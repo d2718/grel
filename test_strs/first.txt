@@ -1,0 +1,4 @@
+This is a long line to test the wrapping functionality. It should get broken
+up several times at each width. We'll see how well I do with this normal style
+text. I have a feeling that this won't cause too much trouble; it'll be the
+later ones that'll cause trouble.

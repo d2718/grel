@@ -1,0 +1,22 @@
+[package]
+name = "grel"
+version = "0.2.0"
+authors = ["Dan <dan@d2718.net>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+confy = "0.4.0"
+directories = "3.0.1"
+lazy_static = "1.4.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4.11"
+signal-hook = "^0.3.1"
+simplelog = "^0.7.6"
+termion = "*"
+
+[dependencies.clap]
+version = "2.33.3"
+

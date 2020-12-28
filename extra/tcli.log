@@ -1,0 +1,70 @@
+2020-12-19 11:36:40 nudge(): sent up to byte 32
+2020-12-19 11:36:40 resize()
+2020-12-19 11:36:40     main:
+2020-12-19 11:36:40     (0, 0) & (50, 93)
+2020-12-19 11:36:40     roster:
+2020-12-19 11:36:40     (0, 93) & (51, 26)
+2020-12-19 11:36:40     input:
+2020-12-19 11:36:40     (51, 0) & (1, 119)
+2020-12-19 11:36:40 paint_status() called
+2020-12-19 11:36:41 try_read(): input buffer is "{
+  "Join": {
+    "who": "Dan",
+    "what": ""
+  }
+}"
+2020-12-19 11:36:41 try_read(): got a chunk; buffer offest 53
+2020-12-19 11:36:41 add_line("* Dan joins .") called
+2020-12-19 11:36:41 wrap({...}, 93) called
+2020-12-19 11:36:41     * Dan joins .
+2020-12-19 11:36:41 paint_input() called
+2020-12-19 11:36:41     (51, 0) & (1, 119)
+2020-12-19 11:36:41 paint_input(): screen refreshed
+2020-12-19 11:36:41 nudge(): sent up to byte 37
+2020-12-19 11:36:41 try_read(): input buffer is "{
+  "List": {
+    "what": "roster",
+    "items": [
+      "Dan"
+    ]
+  }
+}"
+2020-12-19 11:36:41 try_read(): got a chunk; buffer offest 75
+2020-12-19 11:36:41 paint_input() called
+2020-12-19 11:36:41     (51, 0) & (1, 119)
+2020-12-19 11:36:41 paint_input(): screen refreshed
+2020-12-19 11:36:43 get_input(): got keycode 59
+2020-12-19 11:36:43 input buffer: ";", ip at 2
+2020-12-19 11:36:43 paint_input() called
+2020-12-19 11:36:43     (51, 0) & (1, 119)
+2020-12-19 11:36:43 paint_input(): screen refreshed
+2020-12-19 11:36:43 get_input(): got keycode 113
+2020-12-19 11:36:43 input buffer: ";q", ip at 3
+2020-12-19 11:36:43 paint_input() called
+2020-12-19 11:36:43     (51, 0) & (1, 119)
+2020-12-19 11:36:43 paint_input(): screen refreshed
+2020-12-19 11:36:43 get_input(): got keycode 117
+2020-12-19 11:36:43 input buffer: ";qu", ip at 4
+2020-12-19 11:36:43 paint_input() called
+2020-12-19 11:36:43     (51, 0) & (1, 119)
+2020-12-19 11:36:43 paint_input(): screen refreshed
+2020-12-19 11:36:43 get_input(): got keycode 105
+2020-12-19 11:36:43 input buffer: ";qui", ip at 5
+2020-12-19 11:36:43 paint_input() called
+2020-12-19 11:36:43     (51, 0) & (1, 119)
+2020-12-19 11:36:43 paint_input(): screen refreshed
+2020-12-19 11:36:43 get_input(): got keycode 116
+2020-12-19 11:36:43 input buffer: ";quit", ip at 6
+2020-12-19 11:36:43 paint_input() called
+2020-12-19 11:36:43     (51, 0) & (1, 119)
+2020-12-19 11:36:43 paint_input(): screen refreshed
+2020-12-19 11:36:44 get_input(): got keycode 13
+2020-12-19 11:36:44 paint_input() called
+2020-12-19 11:36:44     (51, 0) & (1, 119)
+2020-12-19 11:36:44 paint_input(): screen refreshed
+2020-12-19 11:36:44 nudge(): sent up to byte 13
+2020-12-19 11:36:44 try_read(): input buffer is "{
+  "Logout": "You have logged out."
+}"
+2020-12-19 11:36:44 try_read(): got a chunk; buffer offest 39
+2020-12-19 11:36:44 add_line("You have been logged out.") called
