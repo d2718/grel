@@ -1,9 +1,11 @@
 /*!
 protocol.rs
 
-The grel communication protocol and its associated message types.
+The original, deprecated `grel` communication protocol and its associated
+types. The current version of `grel` and `greld` use the `grel::proto2`
+module.
 
-updated 2020-11-26
+updated 2020-12-29
 */
 
 use serde::{Serialize, Deserialize};

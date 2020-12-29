@@ -3,11 +3,11 @@ grel.rs
 
 The `grel` terminal client.
 
-updated 2020-12-24
+updated 2020-12-29
 */
 
 use lazy_static::lazy_static;
-use log::{debug, trace};
+use log::{error, debug, trace};
 use signal_hook::consts::signal;
 use std::io::stdout;
 use std::net::TcpStream;
@@ -19,7 +19,7 @@ use termion::input::TermRead;
 use termion::event::{Event, Key};
 use termion::raw::IntoRawMode;
 
-use grel::protocol::Msg;
+use grel::proto2::Msg;
 use grel::sock::Sock;
 use grel::config::ClientConfig;
 use grel::line::{Line, Style};
@@ -115,8 +115,8 @@ fn connect(cfg: &ClientConfig) -> Result<Sock, String> {
             Ok(sck) => sck,
         },
     };
-    let msg = Msg::Name{ who: String::new(), new: cfg.name.clone() }.bytes();
-    let res = thesock.blocking_send(&msg, cfg.tick);
+    let b = Msg::Name(cfg.name.clone()).bytes();
+    let res = thesock.blocking_send(&b, cfg.tick);
     match res {
         Err(e) => match thesock.shutdown() {
             Err(ee) => { return Err(format!("Error in initial protocol: {}; error during shutdown: {}", e, ee)); },
@@ -172,11 +172,11 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                     gv.socket.enqueue(&b);
                 },
                 "name" => {
-                    let b = Msg::Name{ who: String::new(), new: arg }.bytes();
+                    let b = Msg::Name(arg).bytes();
                     gv.socket.enqueue(&b);
                 },
                 "join" => {
-                    let b = Msg::Join{ who: String::new(), what: arg }.bytes();
+                    let b = Msg::Join(arg).bytes();
                     gv.socket.enqueue(&b);
                 },
                 x @ _ => {
@@ -265,7 +265,7 @@ fn process_input(evt: Event, scrn: &mut Screen, gv: &mut Globals) -> Mode {
 fn process_msg(m: Msg,
                scrn: &mut Screen,
                gv: &mut Globals)
--> bool {
+-> Result<bool, String> {
     debug!("process_msg(...): rec'd: {:?}", &m);
     match m {
         Msg::Ping => { gv.socket.enqueue(&PING); },
@@ -280,64 +280,9 @@ fn process_msg(m: Msg,
             }
         },
         
-        Msg::Join { who: w, what: rmname } => {
-            let mut sl = Line::new();
-            sl.push("* ");
-            if w == gv.uname {
-                sl.pushf("You", None, None, Style::Bold);
-                sl.push(" join ");
-                gv.rname = rmname.clone();
-            } else {
-                sl.pushf(&w, scrn.hfg(), scrn.hbg(), Style::None);
-                sl.push(" joins ");
-            }
-            gv.socket.enqueue(&ROSTER_REQUEST);
-            sl.pushf(&rmname, scrn.hfg(), scrn.hbg(), Style::None);
-            scrn.push_line(sl);
-        },
-        
-        Msg::Leave { who: w, message: m } => {
-            let mut sl = Line::new();
-            sl.push("* ");
-            sl.pushf(&w, scrn.hfg(), scrn.hbg(), Style::None);
-            sl.push(" leaves: ");
-            sl.push(&m);
-            scrn.push_line(sl);
-            gv.socket.enqueue(&ROSTER_REQUEST);
-        },
-        
-        Msg::Name { who: w, new: n } => {
-            let mut sl = Line::new();
-            sl.push("* ");
-            if w == gv.uname {
-                sl.pushf("You", None, None, Style::Bold);
-                sl.push(" are now known as ");
-                gv.uname = n.clone();
-                write_mode_line(scrn, gv);
-            } else {
-                sl.pushf(&w, scrn.hfg(), scrn.hbg(), Style::None);
-                sl.push(" is now known as ");
-            }
-            sl.pushf(&n, scrn.hfg(), scrn.hbg(), Style::None);
-            scrn.push_line(sl);
-            gv.socket.enqueue(&ROSTER_REQUEST);
-        },
-        
-        Msg::List { what: w, items: mut list } => {
-            match w.as_str() {
-                "roster" => {
-                    scrn.set_roster(&list);
-                },
-                "addr" => {
-                    gv.local_addr = list.pop().unwrap();
-                    write_mode_line(scrn, gv);
-                },
-                _ => {
-                    let mut sl = Line::new();
-                    sl.push(&format!("# Unsupported List of {:?}: {:?}", w, list));
-                    scrn.push_line(sl);
-                },
-            }
+        Msg::Logout(s) => {
+            gv.messages.push(s);
+            return Ok(true);
         },
         
         Msg::Info(s) => {
@@ -346,18 +291,110 @@ fn process_msg(m: Msg,
             sl.pushf(&s, scrn.bfg(), scrn.bbg(), Style::None);
             scrn.push_line(sl);
         },
-        
+
         Msg::Err(s) => {
             let mut sl = Line::new();
             sl.pushf("# ", scrn.bfg(), scrn.bbg(), Style::Bold);
             sl.pushf(&s, scrn.bfg(), scrn.bbg(), Style::Bold);
             scrn.push_line(sl);
         },
-
-        Msg::Logout(s) => {
-            gv.messages.push(s);
-            return true;
+        
+        Msg::Misc { ref what, ref data, ref alt } => match what.as_str() {
+            "join" => {
+                let name = match data.get(0) {
+                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
+                    Some(x) => x,
+                };
+                let mut sl = Line::new();
+                sl.push("* ");
+                if name.as_str() == gv.uname.as_str() {
+                    sl.pushf("You", None, None, Style::Bold);
+                    sl.push(" join ");
+                    if let Some(room) = data.get(1) {
+                        gv.rname = room.clone();
+                    }
+                } else {
+                    sl.pushf(name, scrn.hfg(), scrn.hbg(), Style::None);
+                    sl.push(" joins ");
+                }
+                if let Some(room) = data.get(1) {
+                    sl.pushf(room, scrn.hfg(), scrn.hbg(), Style::None);
+                } else {
+                    sl.push("the server");
+                }
+                sl.push(".");
+                gv.socket.enqueue(&ROSTER_REQUEST);
+                scrn.push_line(sl);
+            },
+            
+            "leave" => {
+                let name = match data.get(0) {
+                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
+                    Some(x) => x,
+                };
+                let message = match data.get(1) {
+                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
+                    Some(x) => x,
+                };
+                let mut sl = Line::new();
+                sl.push("* ");
+                sl.pushf(name, scrn.hfg(), scrn.hbg(), Style::None);
+                sl.push(" leaves: ");
+                sl.push(message);
+                gv.socket.enqueue(&ROSTER_REQUEST);
+                scrn.push_line(sl);
+            },
+            
+            "name" => {
+                let old = match data.get(0) {
+                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
+                    Some(x) => x,
+                };
+                let new = match data.get(1) {
+                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
+                    Some(x) => x,
+                };
+                
+                let mut sl = Line::new();
+                sl.push("* ");
+                if old.as_str() == gv.uname.as_str() {
+                    sl.pushf("You", None, None, Style::Bold);
+                    sl.push(" are now known as ");
+                    gv.uname = new.clone();
+                    write_mode_line(scrn, gv);
+                } else {
+                    sl.pushf(old, scrn.hfg(), scrn.hbg(), Style::None);
+                    sl.push(" is now known as ");
+                }
+                sl.pushf(new, scrn.hfg(), scrn.hbg(), Style::None);
+                sl.push(".");
+                scrn.push_line(sl);
+                gv.socket.enqueue(&ROSTER_REQUEST);
+            },
+            
+            "roster" => {
+                if data.len() < 1 { return Err(format!("Incomplete data: {:?}", &m)); }
+                scrn.set_roster(data);
+            },
+            
+            "addr" => {
+                match data.get(0) {
+                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
+                    Some(addr) => {
+                        gv.local_addr = addr.clone();
+                        write_mode_line(scrn, gv);
+                    },
+                }
+            },
+            
+            _ => {
+                let mut sl = Line::new();
+                sl.push("* ");
+                sl.push(alt);
+                scrn.push_line(sl)
+            },
         },
+
         msg @ _ => {
             let msgs = format!("{:?}", msg);
             let s: String = msgs.chars().map(|c| {
@@ -372,7 +409,7 @@ fn process_msg(m: Msg,
             scrn.push_line(sl);
         },
     }
-    return false;
+    return Ok(false);
 }
 
 fn write_mode_line(scrn: &mut Screen, gv: &Globals) {
@@ -490,10 +527,13 @@ fn main() {
                             },
                             Ok(None) => { break 'msg_loop; },
                             Ok(Some(msg)) => {
-                                let should_quit = process_msg(msg, &mut scrn, &mut gv);
-                                if should_quit {
-                                    break 'main_loop;
-                                }
+                                match process_msg(msg, &mut scrn, &mut gv) {
+                                    Ok(true) => { break 'main_loop; },
+                                    Ok(false) => {},
+                                    Err(e) => {
+                                        error!("process_msg(...) returned error: {}", e);
+                                    },
+                                };
                             },
                         }
                     }

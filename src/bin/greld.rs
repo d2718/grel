@@ -3,7 +3,7 @@ greld.rs
 
 The `grel` daemon (server) process.
 
-updated 2020-12-24
+updated 2020-12-29
 */
 
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ use std::time::{Instant, Duration};
 use log::{debug, warn};
 use simplelog::WriteLogger;
 
-use grel::protocol::*;
+use grel::proto2::*;
 use grel::user::*;
 use grel::room::Room;
 use grel::sock::Sock;
@@ -40,6 +40,15 @@ fn match_string<T>(s: &str, hash: &HashMap<String, T>) -> Vec<String> {
     return v;
 }
 
+fn append_comma_delimited_list<T: AsRef<str>>(base: &mut String, v: &[T]) {
+    let mut v_iter = v.iter();
+    if let Some(x) = v_iter.next() { base.push_str(x.as_ref()); }
+    while let Some(x) = v_iter.next() {
+        base.push_str(", ");
+        base.push_str(x.as_ref());
+    }
+}
+
 fn initial_negotiation(u: &mut User) -> Result<(), String> {
     match u.blocking_get(BLOCK_TIMEOUT) {
         Err(e) => {
@@ -48,7 +57,7 @@ fn initial_negotiation(u: &mut User) -> Result<(), String> {
             return Err(err_str);
         },
         Ok(m) => match m {
-            Msg::Name { who: _, new: new_name } => {
+            Msg::Name(new_name) => {
                 u.set_name(&new_name);
                 return Ok(());
             },
@@ -161,11 +170,11 @@ fn process_room(
                 let env = Env::new(Endpoint::User(*uid), Endpoint::Room(rid), &newm);
                 envz.push(env);
             },
-            Msg::Name { who: _, new: new_candidate } => {
+            Msg::Name(new_candidate) => {
                 let act = Action::Rename{ who: *uid, new: new_candidate };
                 acts.push(act);
             },
-            Msg::Join { who: _, what: room_name }=> {
+            Msg::Join(room_name)=> {
                 let collapsed = ascollapse(&room_name);
                 debug!("process_room({}): Msg::Join: {} ({})", &rid, &room_name, &collapsed);
                 if collapsed.len() == 0 {
@@ -217,9 +226,12 @@ fn process_room(
                                 Some(u) => { names_list.push(String::from(u.get_name())); },
                             }
                         }
-                        let msg = Msg::List {
+                        let mut altstr = String::from("Room roster: ");
+                        append_comma_delimited_list(&mut altstr, &names_list);
+                        let msg = Msg::Misc {
                             what: String::from("roster"),
-                            items: names_list,
+                            data: names_list,
+                            alt: altstr,
                         };
                         let env = Env::new(Endpoint::Server, Endpoint::User(*uid), &msg);
                         envz.push(env);
@@ -232,8 +244,15 @@ fn process_room(
                             env = Env::new(Endpoint::Server, Endpoint::User(*uid),
                                 &Msg::Info(format!("No users matching the pattern \"{}\".", &match_name)));
                         } else {
+                            let mut altstr = String::from("Matching names: ");
+                            append_comma_delimited_list(&mut altstr, &matches);
                             env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::List{ what: "who".to_string(), items: matches, });
+                                &Msg::Misc {
+                                    what: "who".to_string(),
+                                    data: matches,
+                                    alt: altstr,
+                                }
+                            );
                         }
                         envz.push(env);
                     },
@@ -276,9 +295,11 @@ fn process_room(
                         },
                     };
                     targ_r.join(*w);
-                    let join_msg = Msg::Join{
-                        who: String::from(mu.get_name()),
-                        what: String::from(targ_r.get_name()),
+                    let join_msg = Msg::Misc {
+                        what: String::from("join"),
+                        data: vec![String::from(mu.get_name()),
+                                   String::from(targ_r.get_name())],
+                        alt: format!("{} joins {}.", mu.get_name(), targ_r.get_name()),
                     };
                     let join_env = Env::new(Endpoint::User(*w), Endpoint::Room(*t), &join_msg);
                     targ_r.enqueue(join_env);
@@ -287,9 +308,11 @@ fn process_room(
                 }
                 {
                     let cur_r = room_map.get_mut(&rid).unwrap();
-                    let leave_msg = Msg::Leave{
-                        who: String::from(mu.get_name()),
-                        message: String::from("Moved to another room."),
+                    let leave_msg = Msg::Misc {
+                        what: String::from("leave"),
+                        data: vec![String::from(mu.get_name()),
+                                   "moved to another room".to_string()],
+                        alt: format!("{} moved to another room.", mu.get_name()),
                     };
                     let leave_env = Env::new(Endpoint::User(*w), Endpoint::Room(rid), &leave_msg);
                     envz.push(leave_env);
@@ -323,9 +346,11 @@ fn process_room(
                     continue;
                 }
                 if let Some(mu) = user_map.get_mut(&w) {
-                    let msg = Msg::Name{
-                        who: mu.get_name().to_string(),
-                        new: new_name.clone(),
+                    let msg = Msg::Misc {
+                        what: String::from("name"),
+                        data: vec![mu.get_name().to_string(), new_name.clone()],
+                        alt: format!("{} is now known as {}.",
+                                    mu.get_name(), &new_name),
                     };
                     let _ = ustr_map.remove(mu.get_idstr());
                     let env = Env::new(Endpoint::Server, Endpoint::Room(rid), &msg);
@@ -341,9 +366,11 @@ fn process_room(
                 if let Some(mut mu) = user_map.remove(w) {
                     let _ = ustr_map.remove(mu.get_idstr());
                     mu.logout(&twho);
-                    let msg = Msg::Leave{
-                        who: mu.get_name().to_string(),
-                        message: salutation.to_string(),
+                    let msg = Msg::Misc {
+                        what: "leave".to_string(),
+                        data: vec![mu.get_name().to_string(),
+                                   salutation.clone()],
+                        alt: format!("{} leaves: {}", mu.get_name(), &salutation),
                     };
                     let env = Env::new(Endpoint::User(*w), Endpoint::Room(rid), &msg);
                     envz.push(env);
@@ -356,12 +383,18 @@ fn process_room(
             
             Action::Address{ who: w } => {
                 if let Some(mu) = user_map.get_mut(&w) {
-                    let msg = Msg::List {
+                    let (addr_str, alt_str): (String, String) = match mu.get_addr() {
+                        None => ("???".to_string(),
+                            "Your public address cannot be determined.".to_string()),
+                        Some(s) => {
+                            let astr = format!("Your public address is{}.", &s);
+                            (s, astr)
+                        },
+                    };
+                    let msg = Msg::Misc {
                         what: String::from("addr"),
-                        items: match mu.get_addr() {
-                            None => vec![String::from("???")],
-                            Some(s) => vec![s],
-                        }
+                        data: vec![addr_str],
+                        alt: alt_str,
                     };
                     let env = Env::new(Endpoint::Server, Endpoint::User(*w), &msg);
                     envz.push(env);
@@ -471,17 +504,21 @@ fn main() {
                     let new_name = gen_name(u.get_id(), &ustr_map);
                     let msg = Msg::Err(err_msg);
                     u.deliver_msg(&msg);
-                    let msg = Msg::Name {
-                        who: String::from(u.get_name()),
-                        new: String::from(&new_name),
+                    let msg = Msg::Misc {
+                        what: "name".to_string(),
+                        data: vec![String::from(u.get_name()),
+                                   String::from(&new_name)],
+                        alt: format!("You are now known as \"{}\".", &new_name),
                     };
                     u.set_name(&new_name);
                     u.deliver_msg(&msg);
                 }
 
-                let msg = Msg::Join{ who: u.get_name().to_string(),
-                                     what: String::new(),
-                                    };
+                let msg = Msg::Misc{
+                    what: "join".to_string(),
+                    data: vec![u.get_name().to_string(), String::new()],
+                    alt: format!("{} joins the lobby.", u.get_name()),
+                };
                 let env = Env::new(Endpoint::Server, Endpoint::Room(0), &msg);
                 let mut lobby = room_map.get_mut(&0).unwrap();
                 lobby.join(u.get_id());

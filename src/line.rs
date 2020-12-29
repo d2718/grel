@@ -446,7 +446,7 @@ mod test {
         x.push("ozzzer...!!!");
         
         for n in &[40usize, 50, 60] {
-            for _ in (0..*n) { print!("-"); }
+            for _ in 0..*n { print!("-"); }
             println!("");
             for line in x.lines(*n) { println!("{}", &line); }
         }

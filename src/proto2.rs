@@ -1,10 +1,10 @@
 /*!
 proto2.rs
 
-A newer, simpler, more easily-extensible `grel` protocol, to which it will
-eventually switch. This will supersede the `grel::protocol` lib.
+A newer, simpler, more easily-extensible `grel` protocol. As of 2020-12-29,
+this supersedes the `grel::protocol` lib.
 
-2020-12-28
+2020-12-29
 */
 
 use serde::{Serialize, Deserialize};
@@ -62,6 +62,58 @@ pub enum Msg {
     done something wrong, like sent an invalid message.
     */
     Err(String),
+    
+    /**
+    
+    Current Misc variants:
+    
+    ```
+    // in response to a Query { what: "roster". ... }
+    Misc {
+        what: "roster".to_string(),
+        data: vec!["user1".to_string(), "user2".to_string()], # ...
+        alt: "[ comma-delimited list of Users in room ]".to_string(),
+    };
+    
+    // when a user joins a channel
+    Misc {
+        what: "join".to_string(),
+        data: vec!["grel user".to_string(),
+                   "room name".to_string()],
+        alt: "grel user joins [room name]".to_string(),
+    };
+    
+    // when a user logs out or leaves a channel
+    Misc {
+        what: "leave".to_string(),
+        data: vec!["grel user".to_string(),
+                   "moved to another room".to_string()],
+        alt: "grel user moved to another room".to_string(),
+    };
+    
+    // when a user changes his or her name
+    Misc {
+        what: "name".to_string(),
+        data: vec!["old name".to_string(),
+                   "new name".to_string()],
+        alt: "\"old name\" is now known as \"new name\".".to_string(),
+    };
+    
+    // in response to a Query { what: "addr", ... }
+    Misc {
+        what: "addr".to_string(),
+        data: vec!["127.0.0.1:33333".to_string()]
+        alt: "Your public address is 127.0.0.1:33333".to_string(),
+    };
+    
+    // in response to a Query { what: "who", ... }
+    Misc {
+        what: "who",
+        data: vec!["user1".to_string(), "user2".to_string(), ... ],
+        alt: "Matching names: \"user1\", \"user2\", ...".to_string(),
+    };
+    ```
+    */
     
     Misc {
         what: String,

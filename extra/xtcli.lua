@@ -5,6 +5,10 @@
 grel testing client in lua,
 extended version with more features
 
+As of 2020-12-29, greld has switched to using the protocol defined in the
+grel::proto2 module, and this client no longer works. This will eventually
+be updated, but it hasn't yet.
+
 2020-12-19
 --]]
 
