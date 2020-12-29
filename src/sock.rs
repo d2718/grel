@@ -20,7 +20,7 @@ use std::io::{Read, Write};
 use std::net::{TcpStream, Shutdown};
 use std::error::Error;
 use serde_json::error::Category;
-use super::protocol::Msg;
+use super::proto2::Msg;
 
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
