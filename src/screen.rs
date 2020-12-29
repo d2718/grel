@@ -6,9 +6,9 @@ The `grel` client terminal output manager.
 */
 
 use lazy_static::lazy_static;
-use log::{debug, trace};
+use log::{trace};
 use std::io::{Write, stdout};
-use termion::raw::{IntoRawMode, RawTerminal};
+use termion::raw::RawTerminal;
 use termion::{cursor, clear};
 
 use super::line::*;

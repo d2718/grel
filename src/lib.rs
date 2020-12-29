@@ -8,3 +8,7 @@ pub mod config;
 pub mod line;
 #[allow(dead_code)]
 pub mod screen;
+
+
+// new protocol module; not yet in use
+pub mod proto2;

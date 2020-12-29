@@ -23,7 +23,6 @@ use grel::config::ServerConfig;
 // const DEBUG: bool = true;
 
 static BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
-static BYTES_LIMIT:    usize = 1024;
 static BYTES_PER_TICK: usize = 6;
 
 enum Action {

@@ -16,8 +16,6 @@ encoded when sticking it into a `protocol::Env`, and those bytes get
 pushed into the `Sock`.
 
 */
-use log::debug;
-
 use std::io::{Read, Write};
 use std::net::{TcpStream, Shutdown};
 use std::error::Error;

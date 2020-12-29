@@ -151,7 +151,6 @@ for line in x.lines(60).iter() { println!("{}", line); }
 pub struct Line {
     chars:  Vec<char>,
     width:  Option<usize>,
-    height: usize,
     fdirs:  Vec<Fmtr>,
     render: Vec<String>,
 }
@@ -162,7 +161,6 @@ impl Line {
         Line {
             chars: Vec::new(),
             width: None,
-            height: 1,
             fdirs: Vec::new(),
             render: Vec::new(),
         }
