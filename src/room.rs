@@ -14,7 +14,7 @@ const DEBUG: bool = true;
 
 use std::collections::HashMap;
 
-use super::protocol::{Env, Endpoint};
+use super::proto2::{Env, Endpoint};
 use super::user::{User, ascollapse};
 
 #[derive(Debug)]

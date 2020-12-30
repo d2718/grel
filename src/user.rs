@@ -3,7 +3,7 @@ user.rs
 
 The `User` struct--representing a connected client--and related methods.
 
-updated: 2020-11-29
+updated: 2020-12-28
 
 */
 
@@ -13,7 +13,7 @@ use std::fmt::Display;
 use std::time::{Duration, Instant};
 use lazy_static::lazy_static;
 use super::sock::{Sock, SockError};
-use super::protocol::{Endpoint, Env, Msg};
+use super::proto2::{Endpoint, Env, Msg};
 use super::unidata::Multichar;
 
 static TICK: Duration = Duration::from_millis(100);
