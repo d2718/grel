@@ -2,7 +2,7 @@
 
 The `grel` client terminal output manager.
 
-2020-12-24
+2020-12-30
 */
 
 use lazy_static::lazy_static;
@@ -34,6 +34,14 @@ lazy_static!{
         termion::style::Reset);
 }
 
+struct Bits {
+    stat_begin: String,
+    stat_begin_chars: usize,
+    stat_end: String,
+    stat_end_chars: usize,
+    full_hline: String,
+}
+
 pub struct Screen {
     lines: Vec<Line>,
     input: Vec<char>,
@@ -52,6 +60,7 @@ pub struct Screen {
     borders_fg: Option<FgCol>,
     highlight_bg: Option<BgCol>,
     highlight_fg: Option<FgCol>,
+    bits: Bits,
     
     lines_scroll: u16,
     roster_scroll: u16,
@@ -63,6 +72,38 @@ impl Screen {
     pub fn new<T: Write>(term: &mut RawTerminal<T>, roster_chars: u16) -> Screen {
         let (x, y): (u16, u16) = termion::terminal_size().unwrap();
         write!(term, "{}", cursor::Hide).unwrap();
+        
+        let new_bits = {
+            let mut start = Line::new();
+            let mut end = Line::new();
+            start.pushf(&VBARSTR, DEFAULT_BORDER_FG.as_ref(),
+                                  DEFAULT_BORDER_BG.as_ref(),
+                                  Style::None);
+            start.push(" ");
+            end.push(" ");
+            end.pushf(&VBARSTR, DEFAULT_BORDER_FG.as_ref(),
+                                DEFAULT_BORDER_BG.as_ref(),
+                                Style::None);
+            let mut hline = Line::new();
+            {
+                let mut s = String::with_capacity(x as usize);
+                for _ in 0..x { s.push(HBAR); }
+                hline.pushf(&s, DEFAULT_BORDER_FG.as_ref(),
+                                DEFAULT_BORDER_BG.as_ref(),
+                                Style::None);
+            }
+            
+            let start_len = start.len();
+            let end_len = end.len();
+            
+            Bits {
+                stat_begin: start.first_n_chars(start_len),
+                stat_begin_chars: start_len,
+                stat_end: end.first_n_chars(end_len),
+                stat_end_chars: end_len,
+                full_hline: hline.first_n_chars((x+1) as usize),
+            }
+        };
         
         Screen {
             lines: Vec::new(), input: Vec::new(), roster: Vec::new(),
@@ -77,6 +118,7 @@ impl Screen {
             highlight_fg: DEFAULT_HIGH_FG.clone(),
             lines_scroll: 0, roster_scroll: 0,
             last_x_size: x, last_y_size: y,
+            bits: new_bits,
         }
     }
     
@@ -197,6 +239,14 @@ impl Screen {
         self.stat_ll = new_stat;
         self.stat_dirty = true;
     }
+    pub fn set_stat_ul(&mut self, new_stat: Line) {
+        self.stat_ul = new_stat;
+        self.stat_dirty = true;
+    }
+    pub fn set_stat_ur(&mut self, new_stat: Line) {
+        self.stat_ur = new_stat;
+        self.stat_dirty = true;
+    }
     
     /** Set the size at which the `Screen` should be rendered. This is
     intended to be the entire terminal window.
@@ -205,6 +255,13 @@ impl Screen {
     call to `.refresh()`, or it probably won't look right.
     */
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        if cols != self.last_x_size {
+            let mut s = String::with_capacity(cols as usize);
+            for _ in 0..cols { s.push(HBAR); }
+            let mut hl = Line::new();
+            hl.pushf(&s, self.bfg(), self.bbg(), Style::None);
+            self.bits.full_hline = hl.first_n_chars(cols as usize);
+        }
         if (cols != self.last_x_size) || (rows != self.last_y_size) {
             self.lines_dirty = true;
             self.input_dirty = true;
@@ -333,26 +390,61 @@ impl Screen {
     
     fn refresh_stat<T: Write>(&mut self, term: &mut RawTerminal<T>) {
         trace!("Screen::refresh_stat(...) called");
-        let hline = {
-            let mut s = String::new();
-            for _ in 0..self.last_x_size { s.push(HBAR); }
-            let mut l: Line = Line::new();
-            l.pushf(&s, self.bfg(), self.bbg(), Style::None);
-            l.first_n_chars(self.last_x_size as usize)
-        };
         
-        let mut statpart = Line::new();
-        statpart.pushf(&VBARSTR, self.bfg(), self.bbg(), Style::None);
-        statpart.push(" ");
-        statpart.append(&self.stat_ll);
-        statpart.push(" ");
-        statpart.pushf(&VBARSTR, self.bfg(), self.bbg(), Style::None);
-        write!(term, "{}{}", cursor::Goto(1, 1), &hline).unwrap();
-        write!(term, "{}{}{}", cursor::Goto(1, self.last_y_size-1), &hline,
-                               cursor::Goto(2, self.last_y_size-1))
-            .unwrap();
-        write!(term, "{}", &statpart.first_n_chars((self.last_x_size as usize) - 6))
-            .unwrap();
+        /* Lower left corner (there is no lower-right as of yet). */
+        let stat_pad = 2 + self.bits.stat_begin_chars + self.bits.stat_end_chars;
+        let stat_room = (self.last_x_size as usize) - stat_pad;
+        write!(term, "{}{}{}{}{}{}", cursor::Goto(1, self.last_y_size-1),
+                     &self.bits.full_hline,
+                     cursor::Goto(2, self.last_y_size-1),
+                     &self.bits.stat_begin,
+                     &self.stat_ll.first_n_chars(stat_room),
+                     &self.bits.stat_end).unwrap();
+        
+        /* Upper left and right corners. */
+        
+        /* characters surrounding actual text:
+        1    2    3
+        -|  |-|  |-
+        + 2 starts, 2 ends
+        */
+        let bits_sum = (3 + (self.bits.stat_begin_chars * 2)
+                          + (self.bits.stat_end_chars * 2)) as u16;
+        let tot_space = self.last_x_size - bits_sum;
+        let space_each: usize = (tot_space / 2) as usize;
+        let abbrev_space = space_each - 3;
+        
+        write!(term, "{}{}{}", cursor::Goto(1, 1), &self.bits.full_hline,
+                               cursor::Goto(2, 1)).unwrap();
+        if self.stat_ul.len() > space_each {
+            write!(term, "{}{}...{}", &self.bits.stat_begin,
+                         &self.stat_ul.first_n_chars(abbrev_space),
+                         &self.bits.stat_end).unwrap();
+        } else {
+            write!(term, "{}{}{}", &self.bits.stat_begin,
+                         &self.stat_ul.first_n_chars(space_each),
+                         &self.bits.stat_end).unwrap();
+        }
+        
+        if self.stat_ur.len() > space_each {
+            let ur_offs: u16 = self.last_x_size -
+                              (1 + self.bits.stat_begin_chars +
+                                    self.bits.stat_end_chars +
+                                    space_each) as u16;
+            write!(term, "{}{}{}...{}", cursor::Goto(ur_offs, 1),
+                         &self.bits.stat_begin,
+                         &self.stat_ur.first_n_chars(abbrev_space),
+                         &self.bits.stat_end).unwrap();
+        } else {
+            let ur_offs: u16 = self.last_x_size -
+                              (1 + self.bits.stat_begin_chars +
+                                    self.bits.stat_end_chars +
+                                    self.stat_ur.len()) as u16;
+            write!(term, "{}{}{}{}", cursor::Goto(ur_offs, 1),
+                        &self.bits.stat_begin,
+                        &self.stat_ur.first_n_chars(space_each),
+                        &self.bits.stat_end).unwrap();
+        }
         
         self.stat_dirty = false;
     }
@@ -371,7 +463,7 @@ impl Screen {
         let main_w = self.last_x_size - rost_w;
         let main_h = self.last_y_size - 2;
         
-        if (main_w < 12) || (main_h < 5) {
+        if (main_w < 20) || (main_h < 5) {
             write!(term, "{}{}The terminal window is too small. Please make it larger.",
                     clear::All, cursor::Goto(1, 1)).unwrap();
             term.flush().unwrap();

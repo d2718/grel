@@ -309,6 +309,9 @@ fn process_msg(m: Msg,
                     sl.push(" join ");
                     if let Some(room) = data.get(1) {
                         gv.rname = room.clone();
+                        let mut room_line = Line::new();
+                        room_line.pushf(&gv.rname, scrn.hfg(), scrn.hbg(), Style::None);
+                        scrn.set_stat_ur(room_line);
                     }
                 } else {
                     sl.pushf(name, scrn.hfg(), scrn.hbg(), Style::None);
@@ -466,8 +469,14 @@ fn main() {
         let mut term = stdout().into_raw_mode().unwrap();
         let mut scrn: Screen = Screen::new(&mut term, cfg.roster_width);
         let mut evt_iter = termion::async_stdin().events();
+        let mut addr_line = Line::new();
+        addr_line.pushf(&gv.server_addr, scrn.hfg(), scrn.hbg(), Style::None);
+        scrn.set_stat_ul(addr_line);
+        let mut room_line = Line::new();
+        room_line.pushf(&gv.rname, scrn.hfg(), scrn.hbg(), Style::None);
+        scrn.set_stat_ur(room_line);
         write_mode_line(&mut scrn, &gv);
-        
+
         'main_loop: loop {
             let loop_start = Instant::now();
             while let Some(r) = evt_iter.next() {
