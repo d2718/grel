@@ -20,9 +20,10 @@ functions.
 
 TODO:
 
-  * Spawning a new thread solely to catch `SIGWINCH` seems overkill. I don't
+  * ~~Spawning a new thread solely to catch `SIGWINCH` seems overkill. I don't
     know what I was thinking. I'm just going to have the client check the
-    terminal size every time through its loop to detect changes.
+    terminal size every time through its loop to detect changes.~~
+    done 2020-12-30
 
   * Rate-limiting. There is some provision for rate-limiting built into
     the `User` struct, but currently the server does nothing with it.

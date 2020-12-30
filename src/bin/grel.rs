@@ -3,16 +3,13 @@ grel.rs
 
 The `grel` terminal client.
 
-updated 2020-12-29
+updated 2020-12-30
 */
 
 use lazy_static::lazy_static;
 use log::{error, debug, trace};
-use signal_hook::consts::signal;
 use std::io::stdout;
 use std::net::TcpStream;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant};
 
 use termion::input::TermRead;
@@ -435,6 +432,7 @@ fn main() {
         .unwrap();
         
     debug!("{:?}", &cfg);
+    println!("Attempting to connect to {}...", &cfg.address);
     let mut sck: Sock = match connect(&cfg) {
         Err(e) => {
             println!("{}", e);
@@ -442,6 +440,7 @@ fn main() {
         },
         Ok(x) => x,
     };
+    println!("...success. Negotiating initial protocol...");
     
     {
         let b = Msg::Query{
@@ -450,6 +449,7 @@ fn main() {
         }.bytes();
         sck.enqueue(&b);
     }
+    println!("...success. Initializing terminal.");
     
     let mut gv: Globals = Globals {
         uname: cfg.name.clone(),
@@ -463,9 +463,6 @@ fn main() {
     };
     
     {
-        let should_resize = Arc::new(AtomicBool::new(false));
-        signal_hook::flag::register(signal::SIGWINCH,
-            Arc::clone(&should_resize)).unwrap();
         let mut term = stdout().into_raw_mode().unwrap();
         let mut scrn: Screen = Screen::new(&mut term, cfg.roster_width);
         let mut evt_iter = termion::async_stdin().events();
@@ -540,10 +537,7 @@ fn main() {
                 },
             }
             
-            if should_resize.swap(false, Ordering::Relaxed) {
-                scrn.auto_resize();
-            }
-            
+            scrn.auto_resize();
             scrn.refresh(&mut term);
             let loop_time = Instant::now().duration_since(loop_start);
             if loop_time < cfg.tick {
