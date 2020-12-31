@@ -53,6 +53,7 @@ struct Globals {
     cmd: char,
 }
 
+/** Read command line options and configuration file. */
 fn configure() -> ClientConfig {
     let opts = clap::App::new("grel")
         .max_term_width(80)
@@ -104,6 +105,9 @@ fn configure() -> ClientConfig {
     return cfg;
 }
 
+/** Attempt to connect to the `greld` server specified either on the
+command line or in the config file.
+*/
 fn connect(cfg: &ClientConfig) -> Result<Sock, String> {
     let mut thesock: Sock = match TcpStream::connect(&cfg.address) {
         Err(e) => { return Err(format!("Error connecting to {}: {}", cfg.address, e)); },
@@ -159,6 +163,9 @@ fn parse_command_line(ipt: Vec<char>) -> (String, String) {
     return (cmd, arg);
 }
 
+/** In input mode, when the user hits return, this processes processes the
+content of the input line and decides what to do.
+*/
 fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
     if let Some(c) = ipt.first() {
         if *c == gv.cmd {
@@ -205,6 +212,10 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
     gv.socket.enqueue(&b);
 }
 
+/** Respond to key presses when in "command" mode.
+
+Returns the mode the client should be in after processing this event.
+*/
 fn process_command(evt: Event, _scrn: &mut Screen, gv: &mut Globals) -> Mode {
     trace!("process_command(...): rec'd: {:?}", &evt);
     match evt {
@@ -228,6 +239,12 @@ fn process_command(evt: Event, _scrn: &mut Screen, gv: &mut Globals) -> Mode {
     return Mode::Command;
 }
 
+/** Respond to key presses when in "input" mode. Mostly this involves
+adding characters to the input line or moving the insertion point on
+the input line.
+
+Returns the mode the client should be in after processing this event.
+*/
 fn process_input(evt: Event, scrn: &mut Screen, gv: &mut Globals) -> Mode {
     match evt {
         Event::Key(k) => match k {
@@ -258,7 +275,10 @@ fn process_input(evt: Event, scrn: &mut Screen, gv: &mut Globals) -> Mode {
     return Mode::Input;
 }
 
-/** Returns true if the program should quit. */
+/** When the Sock coughs up a Msg, this function decides what to do with it.
+
+Returns true if the program should quit.
+*/
 fn process_msg(m: Msg,
                scrn: &mut Screen,
                gv: &mut Globals)
@@ -412,6 +432,9 @@ fn process_msg(m: Msg,
     return Ok(false);
 }
 
+/** When the mode line (in the lower-left-hand corner) should change,
+this updates it.
+*/
 fn write_mode_line(scrn: &mut Screen, gv: &Globals) {
     let none = grel::line::Style::None;
     let mut mode_line = Line::new();
@@ -443,6 +466,7 @@ fn main() {
         },
         Ok(x) => x,
     };
+    sck.set_read_buffer_size(cfg.read_size);
     println!("...success. Negotiating initial protocol...");
     
     {
@@ -476,9 +500,15 @@ fn main() {
         room_line.pushf(&gv.rname, scrn.hfg(), scrn.hbg(), Style::None);
         scrn.set_stat_ur(room_line);
         write_mode_line(&mut scrn, &gv);
-
+        
+        /** The 'main_loop repeats until the program should end, generally
+        after disconnection.
+        */
         'main_loop: loop {
             let loop_start = Instant::now();
+            
+            /** Read any input that has piled up since the last iteration
+            of `main_loop. */
             while let Some(r) = evt_iter.next() {
                 match r {
                     Err(e) => {
@@ -503,6 +533,8 @@ fn main() {
                 }
             }
             
+            /** Attempt to push any data in the `Sock`'s outgoing buffer to
+            the server. */
             let outgoing_bytes = gv.socket.send_buff_size();
             match gv.socket.blow() {
                 Err(e) => {
@@ -515,6 +547,10 @@ fn main() {
                 },
             }
             
+            /** Try to suck from the byte stream incoming from the server.
+            
+            If there's anything there, attempt to decode `Msg`s from the
+            `Sock` and process them until there's nothing left. */
             let suck_res = gv.socket.suck();
             match suck_res {
                 Err(e) => {
@@ -546,8 +582,18 @@ fn main() {
                 },
             }
             
+            /** Check for terminal resize every iteration; if the size hasn't
+            changed, `Screen::auto_resize()` doesn't do anything else. */
             scrn.auto_resize();
+            
+            /** If there are any changes to the state of the screen (I think
+            everything but the receipt/sending of a `Msg::Ping` does this),
+            redraw the areas that changed. */
             scrn.refresh(&mut term);
+            
+            /** If less than the configured tick time has elapsed, sleep for
+            the rest of the tick. This will probably happen unless there's a
+            gigantic amount of incoming data. */
             let loop_time = Instant::now().duration_since(loop_start);
             if loop_time < cfg.tick {
                 std::thread::sleep(cfg.tick - loop_time);
