@@ -75,9 +75,13 @@ This is indicated by the `Ipt` in the lower-left-hand corner.
 
 Hitting escape (or backspace when the input line is empty) will put you in
 _command_ mode (indicated by `Com` in the lower-left-hand corner), where you
-will eventually be able to control more aspects of the client. Right now, all
-you can do is quit by hitting `q`, or return to input mode with the space bar
-or return key.
+will eventually be able to control more aspects of the client. Right now,
+
+  * `q` will quit with no leave message.
+  
+  * `PgUp/PgDn` will scroll the chat text up/down one screen.
+  
+  * The up/down arrow keys will scroll the chat text up/down one line.
 
 You can also type some server-interaction commands from input mode. For
 example,

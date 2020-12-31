@@ -216,7 +216,7 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
 
 Returns the mode the client should be in after processing this event.
 */
-fn process_command(evt: Event, _scrn: &mut Screen, gv: &mut Globals) -> Mode {
+fn process_command(evt: Event, scrn: &mut Screen, gv: &mut Globals) -> Mode {
     trace!("process_command(...): rec'd: {:?}", &evt);
     match evt {
         Event::Mouse(_) => {
@@ -226,6 +226,16 @@ fn process_command(evt: Event, _scrn: &mut Screen, gv: &mut Globals) -> Mode {
         Event::Key(k) => match k {
             Key::Char(SPACE) | Key::Char(RETURN) => {
                 return Mode::Input;
+            },
+            Key::Up   => { scrn.scroll_lines(1); },
+            Key::Down => { scrn.scroll_lines(-1); },
+            Key::PageUp => {
+                let jump = (scrn.get_main_height() as i16) - 1;
+                scrn.scroll_lines(jump);
+            },
+            Key::PageDown => {
+                let jump = 1 - (scrn.get_main_height() as i16);
+                scrn.scroll_lines(jump);
             },
             Key::Char('q') => {
                 let m = Msg::logout("quit...");
@@ -501,13 +511,13 @@ fn main() {
         scrn.set_stat_ur(room_line);
         write_mode_line(&mut scrn, &gv);
         
-        /** The 'main_loop repeats until the program should end, generally
+        /* The 'main_loop repeats until the program should end, generally
         after disconnection.
         */
         'main_loop: loop {
             let loop_start = Instant::now();
             
-            /** Read any input that has piled up since the last iteration
+            /* Read any input that has piled up since the last iteration
             of `main_loop. */
             while let Some(r) = evt_iter.next() {
                 match r {
@@ -533,7 +543,7 @@ fn main() {
                 }
             }
             
-            /** Attempt to push any data in the `Sock`'s outgoing buffer to
+            /* Attempt to push any data in the `Sock`'s outgoing buffer to
             the server. */
             let outgoing_bytes = gv.socket.send_buff_size();
             match gv.socket.blow() {
@@ -547,7 +557,7 @@ fn main() {
                 },
             }
             
-            /** Try to suck from the byte stream incoming from the server.
+            /* Try to suck from the byte stream incoming from the server.
             
             If there's anything there, attempt to decode `Msg`s from the
             `Sock` and process them until there's nothing left. */
@@ -582,16 +592,16 @@ fn main() {
                 },
             }
             
-            /** Check for terminal resize every iteration; if the size hasn't
+            /* Check for terminal resize every iteration; if the size hasn't
             changed, `Screen::auto_resize()` doesn't do anything else. */
             scrn.auto_resize();
             
-            /** If there are any changes to the state of the screen (I think
+            /* If there are any changes to the state of the screen (I think
             everything but the receipt/sending of a `Msg::Ping` does this),
             redraw the areas that changed. */
             scrn.refresh(&mut term);
             
-            /** If less than the configured tick time has elapsed, sleep for
+            /* If less than the configured tick time has elapsed, sleep for
             the rest of the tick. This will probably happen unless there's a
             gigantic amount of incoming data. */
             let loop_time = Instant::now().duration_since(loop_start);
