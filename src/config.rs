@@ -13,15 +13,17 @@ use std::time::Duration;
 use directories::BaseDirs;
 use simplelog::LevelFilter;
 
-const ADDR:          &str = "127.0.0.1:51516";
-const SERVER_LOG:    &str = "greld.log";
-const NAME:          &str = "grel user";
-const SERVER_TICK:    u64 = 100;
-const CLIENT_TICK:    u64 = 100;
-const BLOCK_TIMEOUT:  u64 = 5000;
-const READ_SIZE:    usize = 1024;
-const ROSTER_WIDTH:   u16 = 24;
-const CMD_CHAR:      char = ';';
+const ADDR:           &str = "127.0.0.1:51516";
+const SERVER_LOG:     &str = "greld.log";
+const NAME:           &str = "grel user";
+const SERVER_TICK:     u64 = 100;
+const CLIENT_TICK:     u64 = 100;
+const BLOCK_TIMEOUT:   u64 = 5000;
+const READ_SIZE:     usize = 1024;
+const ROSTER_WIDTH:    u16 = 24;
+const CMD_CHAR:       char = ';';
+const MIN_SCROLLBACK: usize = 1000;
+const MAX_SCROLLBACK: usize = 2000;
 
 /** The `GrelConfigFile` deserializes from a `.toml` file to a struct
 of Rust primitives. Its values are then translated into less primitive
@@ -116,13 +118,15 @@ impl ServerConfig {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ClientConfigFile {
-    address:      String,
-    name:         String,
-    timeout_ms:   u64,
-    block_ms:     u64,
-    read_size:    usize,
-    roster_width: u16,
-    cmd_char:     char,
+    address:        String,
+    name:           String,
+    timeout_ms:     u64,
+    block_ms:       u64,
+    read_size:      usize,
+    roster_width:   u16,
+    cmd_char:       char,
+    max_scrollback: usize,
+    min_scrollback: usize,
 }
 
 impl std::default::Default for ClientConfigFile {
@@ -130,28 +134,32 @@ impl std::default::Default for ClientConfigFile {
         Self {
             address: String::from(ADDR),
             name:    String::from(NAME),
-            timeout_ms:   CLIENT_TICK,
-            block_ms:     BLOCK_TIMEOUT,
-            read_size:    READ_SIZE,
-            roster_width: ROSTER_WIDTH,
-            cmd_char:     CMD_CHAR,
+            timeout_ms:    CLIENT_TICK,
+            block_ms:      BLOCK_TIMEOUT,
+            read_size:     READ_SIZE,
+            roster_width:  ROSTER_WIDTH,
+            cmd_char:      CMD_CHAR,
+            max_scrollback: MAX_SCROLLBACK,
+            min_scrollback: MIN_SCROLLBACK,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct ClientConfig {
-    pub address:      String,
-    pub name:         String,
-    pub tick:         Duration,
-    pub block:        Duration,
-    pub read_size:    usize,
-    pub roster_width: u16,
-    pub cmd_char:     char,
+    pub address:        String,
+    pub name:           String,
+    pub tick:           Duration,
+    pub block:          Duration,
+    pub read_size:      usize,
+    pub roster_width:   u16,
+    pub cmd_char:       char,
+    pub max_scrollback: usize,
+    pub min_scrollback: usize,
 }
 
 impl ClientConfig {
-    pub fn configure(path: Option<&str>) -> ClientConfig {
+    pub fn configure(path: Option<&str>) -> Result<ClientConfig, String> {
         /* I think I let myself get carried away with the matches here.
         The inner match matches on the option argument, calling a different
         confy function depending on whether a filename is supplied; the
@@ -165,11 +173,15 @@ impl ClientConfig {
         } {
             Ok(x) => x,
             Err(e) => {
-                println!("Error loading configuration: {}", e);
-                std::process::exit(1);
+                return Err(format!("Error loading configuration: {}", e));
             },
         };
-        ClientConfig {
+        
+        if f.max_scrollback < f.min_scrollback {
+            return Err("max_scrollback cannot be smaller than min_scrollback".to_string());
+        };
+        
+        let cc = ClientConfig {
             address: f.address,
             name: f.name,
             tick: Duration::from_millis(f.timeout_ms),
@@ -177,7 +189,11 @@ impl ClientConfig {
             read_size: f.read_size,
             roster_width: f.roster_width,
             cmd_char: f.cmd_char,
-        }
+            max_scrollback: f.max_scrollback,
+            min_scrollback: f.min_scrollback,
+        };
+        
+        return Ok(cc);
     }
     
     pub fn generate() -> Result<String, String> {

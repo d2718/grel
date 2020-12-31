@@ -138,10 +138,10 @@ impl Screen {
     /** Trim the scrollback buffer to the latest `n` lines. */
     pub fn prune_scrollback(&mut self, n: usize) {
         if n >= self.lines.len() { return; }
+        let new_zero = self.lines.len() - n;
         
-        let mut temp: Vec<Line> = Vec::with_capacity(n);
-        for _ in 0..n { temp.push(self.lines.pop().unwrap()); }
-        self.lines = temp.drain(..).rev().collect();
+        let temp: Vec<Line> = self.lines.split_off(new_zero);
+        self.lines = temp;
         
         self.lines_dirty = true;
     }

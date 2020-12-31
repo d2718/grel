@@ -97,7 +97,13 @@ fn configure() -> ClientConfig {
         }
     }
     
-    let mut cfg = ClientConfig::configure(opts.value_of("config"));
+    let mut cfg = match ClientConfig::configure(opts.value_of("config")) {
+        Ok(x) => x,
+        Err(e) => {
+            println!("Configuration error: {}", e);
+            std::process::exit(1);
+        },
+    };
     
     if let Some(n) = opts.value_of("name") { cfg.name = String::from(n); }
     if let Some(a) = opts.value_of("address") { cfg.address = String::from(a); }
@@ -462,6 +468,7 @@ fn write_mode_line(scrn: &mut Screen, gv: &Globals) {
 
 fn main() {
     let cfg: ClientConfig = configure();
+    
     simplelog::WriteLogger::init(simplelog::LevelFilter::Trace,
                                  simplelog::Config::default(),
                                  std::fs::File::create("grel.log").unwrap())
@@ -590,6 +597,11 @@ fn main() {
                         }
                     }
                 },
+            }
+            
+            /* If the scrollback buffer has grown too large, prune it down. */
+            if scrn.get_scrollback_length() > cfg.max_scrollback {
+                scrn.prune_scrollback(cfg.min_scrollback);
             }
             
             /* Check for terminal resize every iteration; if the size hasn't
