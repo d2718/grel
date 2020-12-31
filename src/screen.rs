@@ -63,6 +63,7 @@ pub struct Screen {
     bits: Bits,
     
     lines_scroll: u16,
+    lines_scroll_line_n: usize,
     roster_scroll: u16,
     last_x_size: u16,
     last_y_size: u16,
@@ -117,6 +118,7 @@ impl Screen {
             highlight_bg: DEFAULT_HIGH_BG.clone(),
             highlight_fg: DEFAULT_HIGH_FG.clone(),
             lines_scroll: 0, roster_scroll: 0,
+            lines_scroll_line_n: 0,
             last_x_size: x, last_y_size: y,
             bits: new_bits,
         }
@@ -126,6 +128,9 @@ impl Screen {
     pub fn bfg(&self) -> Option<&FgCol> { self.borders_fg.as_ref() }
     pub fn hbg(&self) -> Option<&BgCol> { self.highlight_bg.as_ref() }
     pub fn hfg(&self) -> Option<&FgCol> { self.highlight_fg.as_ref() }
+    
+    /** Return the height of the main scrollback window. */
+    pub fn get_main_height(&self) -> u16 { self.last_y_size - 2 }
     
     /** Return the number of `Line`s in the scrollback buffer. */
     pub fn get_scrollback_length(&self) -> usize { self.lines.len() }
@@ -224,6 +229,17 @@ impl Screen {
         self.input_dirty = true;
     }
     
+    /** Scroll the main display up (or down, for negative values) `n_chars`,
+    or to the end (or beginning), if the new position would be out of range.
+    */
+    pub fn scroll_lines(&mut self, n_chars: i16) {
+        let cur = self.lines_scroll as i16;
+        let mut new = cur + n_chars;
+        if new < 0 { new = 0; }
+        self.lines_scroll = new as u16;
+        self.lines_dirty = true;
+    }
+    
     /** Return the contents of the input line as a String and clear
     the input line.
     */
@@ -303,11 +319,20 @@ impl Screen {
             }
             if y == 1 { break; }
         }
-        while y > 1 {
-            write!(term, "{}{}", cursor::Goto(1, y), &blank).unwrap();
-            y -= 1;
+        
+        /* Check to see if we've scrolled past the end of the scrollback,
+        and if so, scroll us forward a little bit and keep
+        `self.lines_dirty == true` */
+        if y > 1 && self.lines_scroll > 0 {
+            let adjust: i16 = (y - 1) as i16;
+            self.scroll_lines(-adjust);
+        } else {
+            while y > 1 {
+                write!(term, "{}{}", cursor::Goto(1, y), &blank).unwrap();
+                y -= 1;
+            }
+            self.lines_dirty = false;
         }
-        self.lines_dirty = false;
     }
     
     fn refresh_roster<T: Write>(&mut self, term: &mut RawTerminal<T>,
