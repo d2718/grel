@@ -9,10 +9,10 @@ updated: 2020-11-28
 As `grel` is IRC-style chat software, many messages will have a single
 _source_ and be sent to multiple _destinations_. As such, the operation
 of `sock::Sock` is asymmetrical: Reading _from_ a `Sock` yields
-`protocol::Msg` structs, but the data written _to_ a `Sock` should
+`proto2::Msg` structs, but the data written _to_ a `Sock` should
 already be JSON-encoded slices of bytes. This is to avoid the unnecessary
 overhead of encoding a `Msg` once for each recipient. Instead, it gets
-encoded when sticking it into a `protocol::Env`, and those bytes get
+encoded when sticking it into a `proto2::Env`, and those bytes get
 pushed into the `Sock`.
 
 */
@@ -65,7 +65,7 @@ impl SockError {
 
 impl std::fmt::Display for SockError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "JsockError: {}", &(self.msg))
+        write!(f, "SockError: {}", &(self.msg))
     }
 }
 
