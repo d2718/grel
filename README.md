@@ -66,6 +66,14 @@ their default values) are
     should be interpreted as a _command_, rather than just as text to be
     sent to the chat. These instructions will assume the default value.
 
+  * `max_scrollback = 2000`
+    The maximum number of lines to keep in the scrollback buffer.
+
+  * `min_scrollback = 1000`
+    When the scrollback buffer reaches `max_scrollback`, it will be trimmed
+    to this many lines. For reasons that should be obvious, this must be
+    smaller than `max_scrollback`.
+
 #### Use
 
 The client's operation is _modal_ (_a la_ `vi`). Because I am more

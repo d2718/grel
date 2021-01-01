@@ -4,10 +4,9 @@
 
 grel testing client in lua
 
-As of 2020-12-29, greld has switched to using the protocol defined in the
-grel::proto2 module, and this client no longer works.
+This is a sort of bare minimum ncurses client that works.
 
-2020-12-16
+2021-01-01
 --]]
 
 local DEBUG = false
@@ -19,8 +18,8 @@ local json   = require 'dkjson'
 local argz   = require 'dargs'
 local dfmt   = require 'dfmt'
 
-local ADDR = '127.0.0.1'
---local ADDR = '192.168.1.13'
+--local ADDR = '127.0.0.1'
+local ADDR = '192.168.1.13'
 local PORT = 51516
 -- Number of bytes to attempt to read on each read from the socket.
 local READ_SIZE = 1024
@@ -31,6 +30,8 @@ local ROSTER_WIDTH = 24
 
 local SPACE = string.byte(' ')
 local NEWLINE = 13
+local ROSTER_REQUEST = { ['Query'] = { ['what'] = 'roster', ['arg'] = '_', }, }
+
 
 local uname = nil
 
@@ -234,38 +235,21 @@ local function handle_chunk(msg)
             add_line(string.format('%s: %s', t.who, line))
         end
     
-    elseif msg['Join'] then
-        local t = msg['Join']
-        add_line(string.format('* %s joins %s.', t.who, t.what))
-        -- Automatically request roster on joining a new room.
-        if t.who == uname then
-            local u = { ['Query'] = { ['what'] = 'roster', ['arg'] = '_', }, }
-            enqueue(u)
-        end
-    
-    elseif msg['Name'] then
-        local t = msg['Name']
-        add_line(string.format('* "%s" is now known as "%s".', t.who, t.new))
-        if t.who == uname then uname = t.new end
-
-    elseif msg['Leave'] then
-        local t = msg['Leave']
-        add_line(string.format('* %s leaves: %s', t.who, t.message))
-    
-    elseif msg['List'] then
-        local t = msg['List']
-        add_line(string.format('* List: %s', t.what))
-        add_line(table.concat(t.items, ', '))
-    
     elseif msg['Info'] then
         add_line(string.format('* %s', msg['Info']))
     
     elseif msg['Err'] then
         add_line(string.format('# ERROR: %s', msg['Err']))
     
+    elseif msg['Misc'] then
+        add_line(string.format('* %s', msg['Misc']['alt']))
+    
     elseif msg['Logout'] then
         add_line("You have been logged out.")
         return false, msg['Logout']
+    
+    else
+        add_line('% Received unrecognized message type from server.')
     
     end
     
@@ -346,7 +330,7 @@ local function get_input(s)
             elseif ch < 127 then
                 table.insert(input.chars, input.ip, ch)
                 input.ip = input.ip + 1
-                if DEBUG then
+                if false then       -- debugging chunk
                     local t = {}
                     for _, n in ipairs(input.chars) do table.insert(t, string.char(n)) end
                     dbglog('input buffer: "%s", ip at %d', table.concat(t, ''), input.ip)
@@ -369,9 +353,11 @@ local function handle_user_input(line, screen)
         if cmd == ';quit' then
             t = { ['Logout'] = rest, }
         elseif cmd == ';name' then
-            t = { ['Name'] = { ['new'] = rest, ['who'] = '_', }, }
+            t = { ['Name'] = rest, }
         elseif cmd == ';join' then
-            t = { ['Join'] = { ['what'] = rest, ['who'] = '_', }, }
+            t = { ['Join'] = rest, }
+        elseif cmd == ';roster' then
+            t = { ['Query'] = { ['what'] = 'roster', arg = '_'}, }
         elseif cmd == ';who' then
             t = { ['Query'] = { ['what'] = 'who', arg = rest, },  }
         else
@@ -449,7 +435,7 @@ if DEBUG then
     f:close()
 end
 
-local join_obj = { ['Name'] = { ['who'] = '_', ['new']  = uname, }, }
+local join_obj = { ['Name'] = uname, }
 --local join_bytes = json.encode(join_obj)
 
 sock, err = socket.connect(ADDR, PORT)
