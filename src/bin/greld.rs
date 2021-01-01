@@ -226,15 +226,20 @@ fn process_room(
                                 Some(u) => { names_list.push(String::from(u.get_name())); },
                             }
                         }
-                        let mut altstr = String::from("Room roster: ");
-                        append_comma_delimited_list(&mut altstr, &names_list);
-                        let msg = Msg::Misc {
-                            what: String::from("roster"),
-                            data: names_list,
-                            alt: altstr,
-                        };
-                        let env = Env::new(Endpoint::Server, Endpoint::User(*uid), &msg);
-                        envz.push(env);
+                        match room_map.get(&rid) {
+                            None => { warn!("process_room({}): Msg::Query( roster ): room_map.get() returns None!!1", &rid); },
+                            Some(r) => {
+                                let mut altstr = format!("{} roster: ", r.get_name());
+                                append_comma_delimited_list(&mut altstr, &names_list);
+                                let msg = Msg::Misc {
+                                    what: String::from("roster"),
+                                    data: names_list,
+                                    alt: altstr,
+                                };
+                                let env = Env::new(Endpoint::Server, Endpoint::User(*uid), &msg);
+                                envz.push(env);
+                            },
+                        }
                     },
                     "who" => {
                         let match_name = ascollapse(&v);

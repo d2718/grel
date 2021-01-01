@@ -5,14 +5,10 @@
 grel testing client in lua,
 extended version with more features
 
-As of 2020-12-29, greld has switched to using the protocol defined in the
-grel::proto2 module, and this client no longer works. This will eventually
-be updated, but it hasn't yet.
-
-2020-12-19
+2021-01-01
 --]]
 
-local DEBUG = false
+local DEBUG = true
 
 require 'localizer'
 local socket = require 'socket'
@@ -35,6 +31,7 @@ local STATUS_WIDTH = 42
 
 local SPACE = string.byte(' ')
 local NEWLINE = 13
+local ROSTER_REQUEST = { ['Query'] = { ['what'] = 'roster', ['arg'] = '_', }, }
 
 local uname = nil
 
@@ -271,50 +268,30 @@ local function handle_chunk(msg, w)
             add_line(string.format('%s: %s', t.who, line))
         end
     
-    elseif msg['Join'] then
-        local t = msg['Join']
-        add_line(string.format('* %s joins %s.', t.who, t.what))
-        -- Automatically request updated roster on each join.
-        local u = { ['Query'] = { ['what'] = 'roster', ['arg'] = '_', }, }
-        enqueue(u)
-    
-    elseif msg['Name'] then
-        local t = msg['Name']
-        add_line(string.format('* "%s" is now known as "%s".', t.who, t.new))
-        if t.who == uname then
-            uname = t.new
-            paint_status(w.status)
-        end
-        -- Automatically request updated roster on each name change.
-        local u = { ['Query'] = { ['what'] = 'roster', ['arg'] = '_', }, }
-        enqueue(u)
-
-    elseif msg['Leave'] then
-        local t = msg['Leave']
-        add_line(string.format('* %s leaves: %s', t.who, t.message))
-        -- Automatically request updated roster on each leave.
-        local u = { ['Query'] = { ['what'] = 'roster', ['arg'] = '_', }, }
-        enqueue(u)
-    
-    elseif msg['List'] then
-        local t = msg['List']
-        if t['what'] == 'roster' then
-            update_roster(t['items'], w)
-        else
-            add_line(string.format('* List: %s', t.what))
-            add_line(table.concat(t.items, ', '))
-        end
-    
     elseif msg['Info'] then
         add_line(string.format('* %s', msg['Info']))
     
     elseif msg['Err'] then
         add_line(string.format('# ERROR: %s', msg['Err']))
     
+    elseif msg['Misc'] then
+        local t = msg['Misc']
+        if t.what == 'roster' then
+            update_roster(t.data, w)
+        else
+            if t.what == 'join' or t.what == 'leave' or t.what == 'name' then
+                enqueue(ROSTER_REQUEST)
+            end
+            add_line(string.format('* %s', t.alt))
+        end
+    
     elseif msg['Logout'] then
         add_line("You have been logged out.")
         return false, msg['Logout']
     
+    else
+        add_line('% Received unrecognized message type from server.')
+        
     end
     
     return true, nil
@@ -418,7 +395,7 @@ local function get_input(w)
             elseif ch < 127 then
                 table.insert(input.chars, input.ip, ch)
                 input.ip = input.ip + 1
-                if DEBUG then
+                if false then
                     local t = {}
                     for _, n in ipairs(input.chars) do table.insert(t, string.char(n)) end
                     dbglog('input buffer: "%s", ip at %d', table.concat(t, ''), input.ip)
@@ -441,9 +418,9 @@ local function handle_user_input(line, w)
         if cmd == ';quit' then
             t = { ['Logout'] = rest, }
         elseif cmd == ';name' then
-            t = { ['Name'] = { ['new'] = rest, ['who'] = '_', }, }
+            t = { ['Name'] = rest, }
         elseif cmd == ';join' then
-            t = { ['Join'] = { ['what'] = rest, ['who'] = '_', }, }
+            t = { ['Join'] = rest, }
         elseif cmd == ';who' then
             t = { ['Query'] = { ['what'] = 'who', arg = rest, },  }
         else
@@ -535,7 +512,7 @@ if DEBUG then
     f:close()
 end
 
-local join_obj = { ['Name'] = { ['who'] = '_', ['new']  = uname, }, }
+local join_obj = { ['Name'] = uname, }
 --local join_bytes = json.encode(join_obj)
 
 sock, err = socket.connect(ADDR, PORT)
