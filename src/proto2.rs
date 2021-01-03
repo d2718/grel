@@ -29,6 +29,17 @@ pub enum Msg {
     */
     Ping,
     
+    /** A private message delivered only to the recipient.
+    
+    When sent from the client to the server, `who` should be an identifier
+    for the _recipient_; when sent server to client, `who` is the name of
+    the source.
+    */
+    Priv {
+        who: String,
+        text: String,
+    },
+    
     /** A message from the client indicating it would like to disconnect
     cleanly from the server; in response, the server will send back one of
     these with a message and close the connection.
@@ -198,6 +209,13 @@ mod test {
         
         println!("Msg::Ping variant");
         let m = Msg::Ping;
+        test_serde(&m);
+        
+        println!("Msg::Priv variant");
+        let m = Msg::Priv {
+            who: String::from("naggum"),
+            text: "XML is bascially the Hitler of protocols.",
+        };
         test_serde(&m);
         
         println!("Msg::Logout variant");
