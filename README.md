@@ -138,7 +138,8 @@ and you may want to redirect `stdout` to a specific file.
   * Rate-limiting. There is some provision for rate-limiting built into
     the `User` struct, but currently the server does nothing with it.
 
-  * Users should be able to send private messages to each other.
+  * ~~Users should be able to send private messages to each other.~~ done
+    2021-01-03
 
   * Users should be able to "block" specific other users and not see their
     messages
@@ -162,7 +163,8 @@ and you may want to redirect `stdout` to a specific file.
     request (and then display the response properly).
 
   * A bunch of command-mode functionality needs to be implemented, like
-    scrolling the various panes and resizing the roster window.
+    scrolling the various panes and resizing the roster window. (Some of this
+    is done; some isn't.)
 
 I am happy to entertain feature requests, but simplicity is a goal.
 
