@@ -170,10 +170,35 @@ fn process_room(
                 let env = Env::new(Endpoint::User(*uid), Endpoint::Room(rid), &newm);
                 envz.push(env);
             },
+            
+            Msg::Priv { who, text } => {
+                let to_tok = ascollapse(&who);
+                if to_tok.len() == 0 {
+                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                        &Msg::err("The recipient name must have at least one non-whitespace character."));
+                    envz.push(env);
+                    continue;
+                }
+                
+                match ustr_map.get(&to_tok) {
+                    None => {
+                        let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                            &Msg::Err(format!("There is no user whose name matches \"{}\".", &to_tok)));
+                        envz.push(env);
+                    },
+                    Some(tgt_uid) => {
+                        let env = Env::new(Endpoint::User(*uid), Endpoint::User(*tgt_uid),
+                            &Msg::Priv{ who: u.get_name().to_string(), text: text});
+                        envz.push(env);
+                    },
+                }
+            },
+                
             Msg::Name(new_candidate) => {
                 let act = Action::Rename{ who: *uid, new: new_candidate };
                 acts.push(act);
             },
+            
             Msg::Join(room_name)=> {
                 let collapsed = ascollapse(&room_name);
                 debug!("process_room({}): Msg::Join: {} ({})", &rid, &room_name, &collapsed);
@@ -211,6 +236,7 @@ fn process_room(
                 }
 
             },
+            
             Msg::Query { what: k, arg: v }=> {
                 match k.as_str() {
                     "addr" => {
@@ -392,7 +418,7 @@ fn process_room(
                         None => ("???".to_string(),
                             "Your public address cannot be determined.".to_string()),
                         Some(s) => {
-                            let astr = format!("Your public address is{}.", &s);
+                            let astr = format!("Your public address is {}.", &s);
                             (s, astr)
                         },
                     };

@@ -18,8 +18,8 @@ local json   = require 'dkjson'
 local argz   = require 'dargs'
 local dfmt   = require 'dfmt'
 
---local ADDR = '127.0.0.1'
-local ADDR = '192.168.1.13'
+local ADDR = '127.0.0.1'
+--local ADDR = '192.168.1.13'
 local PORT = 51516
 -- Number of bytes to attempt to read on each read from the socket.
 local READ_SIZE = 1024
@@ -52,6 +52,14 @@ local function dbglog(fmtstr, ...)
     f:write(msg)
     if msg:sub(n, n) ~= '\n' then f:write('\n') end
     f:close()
+end
+
+local function tokenize(s)
+    local t = {}
+    for chunk in string.gmatch(s, '%S+') do
+        table.insert(t, chunk)
+    end
+    return t
 end
 
 local sock = nil
@@ -235,6 +243,10 @@ local function handle_chunk(msg)
             add_line(string.format('%s: %s', t.who, line))
         end
     
+    elseif msg['Priv'] then
+        local t = msg['Priv']
+        add_line(string.format('$ %s: %s', t.who, t.text))
+    
     elseif msg['Info'] then
         add_line(string.format('* %s', msg['Info']))
     
@@ -352,6 +364,17 @@ local function handle_user_input(line, screen)
         cmd = cmd:lower()
         if cmd == ';quit' then
             t = { ['Logout'] = rest, }
+        elseif cmd == ';priv' then
+            if not rest then rest = '' end
+            local tokens = tokenize(rest)
+            if #tokens == 0 then
+                add_line('# Error: You must specify a recipient for a private message.')
+                paint_lines(screen)
+            else
+                local who = table.remove(tokens, 1)
+                local txt = table.concat(tokens, ' ')
+                t = { ['Priv'] = { ['who'] = who, ['text'] = txt, }, }
+            end
         elseif cmd == ';name' then
             t = { ['Name'] = rest, }
         elseif cmd == ';join' then

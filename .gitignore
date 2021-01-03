@@ -1,1 +1,7 @@
+# cargo-built executables and documentation
 /target
+
+# any log files
+*.log
+*/*.log
+*.run

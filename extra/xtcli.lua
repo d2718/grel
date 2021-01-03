@@ -268,6 +268,10 @@ local function handle_chunk(msg, w)
             add_line(string.format('%s: %s', t.who, line))
         end
     
+    elseif msg['Priv'] then
+        local t = msg['Priv']
+        add_line(string.format('$ %s: %s', t.who, t.text))
+    
     elseif msg['Info'] then
         add_line(string.format('* %s', msg['Info']))
     

@@ -180,6 +180,9 @@ impl ClientConfig {
         if f.max_scrollback < f.min_scrollback {
             return Err("max_scrollback cannot be smaller than min_scrollback".to_string());
         };
+        if (f.cmd_char as u32) > 128 {
+            return Err("cmd_char must be an ASCII character".to_string());
+        };
         
         let cc = ClientConfig {
             address: f.address,
