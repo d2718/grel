@@ -140,33 +140,65 @@ character) into the command token and the rest of the line.
 
 It is written this way to avoid pulling in the whole regex crate.
 */
-fn parse_command_line(ipt: Vec<char>) -> (String, String) {
-    let mut cmd = String::new();
-    let mut arg = String::new();
+//~ fn parse_command_line(ipt: &[char]) -> (String, String) {
+    //~ let mut cmd = String::new();
+    //~ let mut arg = String::new();
     
-    let mut ipt_iter = ipt.into_iter();
-    let _ = ipt_iter.next();        // discard command char
+    //~ let mut ipt_iter = ipt.iter();
+    //~ let _ = ipt_iter.next();        // discard command char
     
-    while let Some(c) = ipt_iter.next() {
-        if c.is_whitespace() {
-            break;
+    //~ while let Some(c) = ipt_iter.next() {
+        //~ if c.is_whitespace() {
+            //~ break;
+        //~ } else {
+            //~ for x in c.to_lowercase() { cmd.push(x); }
+        //~ }
+    //~ }
+    
+    //~ while let Some(c) = ipt_iter.next() {
+        //~ if c.is_whitespace() {
+            //~ // skip it
+        //~ } else {
+            //~ arg.push(*c);
+            //~ break;
+        //~ }
+    //~ }
+    
+    //~ while let Some(c) = ipt_iter.next() { arg.push(*c); }
+    
+    //~ return (cmd, arg);
+//~ }
+
+/** Divide &str s into alternating chunks of whitespace and non-whitespace. */
+fn tokenize_the_whitespace_too<'a>(s: &'a str) -> Vec<&'a str> {
+    let mut v: Vec<&str> = Vec::new();
+    
+    let mut change: usize = 0;
+    let mut s_iter = s.chars();
+    let mut in_ws = match s_iter.next() {
+        None => { return v; },
+        Some(c) => c.is_whitespace(),
+    };
+    
+    let s_iter = s.char_indices();
+    for (i, c) in s_iter {
+        if in_ws {
+            if !c.is_whitespace() {
+                v.push(&s[change..i]);
+                change = i;
+                in_ws = false;
+            }
         } else {
-            for x in c.to_lowercase() { cmd.push(x); }
+            if c.is_whitespace() {
+                v.push(&s[change..i]);
+                change = i;
+                in_ws = true;
+            }
         }
     }
+    v.push(&s[change..(s.len())]);
     
-    while let Some(c) = ipt_iter.next() {
-        if c.is_whitespace() {
-            // skip it
-        } else {
-            arg.push(c);
-            break;
-        }
-    }
-    
-    while let Some(c) = ipt_iter.next() { arg.push(c); }
-    
-    return (cmd, arg);
+    return v;
 }
 
 /** In input mode, when the user hits return, this processes processes the
@@ -175,20 +207,59 @@ content of the input line and decides what to do.
 fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
     if let Some(c) = ipt.first() {
         if *c == gv.cmd {
-            let (cmd, arg) = parse_command_line(ipt);
+            
+            /* Collect the ipt vector as a string, discarding the cmd_char and
+            translating newlines to spaces. */
+            let cmd_line: String = ipt[1..].into_iter()
+                .map(|c| if *c == RETURN { SPACE } else { *c }).collect();
+                
+            /* Tokenize the resulting string. */
+            let cmd_toks = tokenize_the_whitespace_too(&cmd_line);
+            
+            /* Pre-calculate an upper-bound on the "arg" portion of the
+            command, so multiple allocations need not be made during assembly. */
+            let tot_len = cmd_toks.iter().fold(0usize, |sum, v| sum + v.len());
+            let mut arg = String::with_capacity(tot_len);
+            
+            let cmd = cmd_toks[0].to_lowercase();  
+            
             match cmd.as_str() {
+                
                 "quit" => {
+                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
                     let b = Msg::Logout(arg).bytes();
                     gv.socket.enqueue(&b);
                 },
+                
+                "priv" => {
+                    if cmd_toks.len() < 3 {
+                        let mut sl = Line::new();
+                        sl.pushf("# You must specify a recipient for a private message.",
+                                 scrn.bfg(), scrn.bbg(), Style::None);
+                        scrn.push_line(sl);
+                    } else {
+                        let targ = cmd_toks[2].to_string();
+                        if cmd_toks.len() > 4 { for s in &cmd_toks[4..] { arg.push_str(s); } }
+                        let b = Msg::Priv {
+                            who: targ,
+                            text: arg,
+                        }.bytes();
+                        gv.socket.enqueue(&b);
+                    }
+                },
+                
                 "name" => {
+                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
                     let b = Msg::Name(arg).bytes();
                     gv.socket.enqueue(&b);
                 },
+                
                 "join" => {
+                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
                     let b = Msg::Join(arg).bytes();
                     gv.socket.enqueue(&b);
                 },
+                
                 x @ _ => {
                     let mut sl = Line::new();
                     sl.pushf("# Unknown command ", scrn.bfg(), scrn.bbg(), Style::None);
@@ -303,14 +374,23 @@ fn process_msg(m: Msg,
     match m {
         Msg::Ping => { gv.socket.enqueue(&PING); },
         
-        Msg::Text { who: w, lines: lz } => {
-            for line in &lz {
+        Msg::Text { who, lines } => {
+            for lin in &lines {
                 let mut sl = Line::new();
-                sl.pushf(&w, scrn.hfg(), scrn.hbg(), Style::None);
+                sl.pushf(&who, scrn.hfg(), scrn.hbg(), Style::None);
                 sl.push(": ");
-                sl.push(line);
+                sl.push(lin);
                 scrn.push_line(sl);
             }
+        },
+        
+        Msg::Priv { who, text } => {
+            let mut sl = Line::new();
+            sl.push("$ ");
+            sl.pushf(&who, scrn.bfg(), scrn.bbg(), Style::None);
+            sl.push(": ");
+            sl.push(&text);
+            scrn.push_line(sl);
         },
         
         Msg::Logout(s) => {
@@ -320,15 +400,15 @@ fn process_msg(m: Msg,
         
         Msg::Info(s) => {
             let mut sl = Line::new();
-            sl.pushf("* ", scrn.bfg(), scrn.bbg(), Style::None);
-            sl.pushf(&s, scrn.bfg(), scrn.bbg(), Style::None);
+            sl.pushf("* ", None, None, Style::None);
+            sl.pushf(&s, None, None, Style::None);
             scrn.push_line(sl);
         },
 
         Msg::Err(s) => {
             let mut sl = Line::new();
-            sl.pushf("# ", scrn.bfg(), scrn.bbg(), Style::Bold);
-            sl.pushf(&s, scrn.bfg(), scrn.bbg(), Style::Bold);
+            sl.pushf("# ", scrn.bfg(), scrn.bbg(), Style::None);
+            sl.pushf(&s, scrn.bfg(), scrn.bbg(), Style::None);
             scrn.push_line(sl);
         },
         
