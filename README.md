@@ -104,6 +104,9 @@ example,
     the creator as that room's "Operator", although this currently bestows
     no special priviliges.)
 
+  * `;priv somedude Come join tracksoftheworld.` will send the message
+    "Come join tracksoftheworld" to the user whose name matches `somedude`
+    (if that user exists).
 
 ### Server Instructions
 
