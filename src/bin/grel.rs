@@ -461,6 +461,25 @@ fn process_msg(m: Msg,
                 scrn.push_line(sl);
             },
             
+            "priv_echo" => {
+                let name = match data.get(0) {
+                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
+                    Some(x) => x,
+                };
+                let text = match data.get(1) {
+                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
+                    Some(x) => x,
+                };
+                let mut sl = Line::new();
+                sl.push("$ ");
+                sl.pushf("You", scrn.bfg(), scrn.bbg(), Style::Bold);
+                sl.pushf(" @ ", scrn.bfg(), scrn.bbg(), Style::None);
+                sl.pushf(&name, scrn.hfg(), scrn.hbg(), Style::None);
+                sl.push(": ");
+                sl.push(&text);
+                scrn.push_line(sl);
+            },
+            
             "name" => {
                 let old = match data.get(0) {
                     None => { return Err(format!("Incomplete data: {:?}", &m)); },

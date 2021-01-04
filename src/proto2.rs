@@ -119,9 +119,16 @@ pub enum Msg {
     
     // in response to a Query { what: "who", ... }
     Misc {
-        what: "who",
+        what: "who".to_string(),
         data: vec!["user1".to_string(), "user2".to_string(), ... ],
         alt: "Matching names: \"user1\", \"user2\", ...".to_string(),
+    };
+    
+    // echos a private message back to the sender
+    Misc {
+        what: "priv_echo".to_string(),
+        data: vec!["recipient".to_string(), "text of message".to_string()],
+        alt: "$ You @ Recipient: text of message".to_string()
     };
     ```
     */

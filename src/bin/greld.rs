@@ -30,6 +30,7 @@ enum Action {
     Rename { who: u64, new: String },
     Logout { who: u64, to_who: String, to_room: String },
     Address { who: u64 },
+    Private { from: u64, to: u64, text: String },
 }
 
 fn match_string<T>(s: &str, hash: &HashMap<String, T>) -> Vec<String> {
@@ -187,9 +188,15 @@ fn process_room(
                         envz.push(env);
                     },
                     Some(tgt_uid) => {
-                        let env = Env::new(Endpoint::User(*uid), Endpoint::User(*tgt_uid),
-                            &Msg::Priv{ who: u.get_name().to_string(), text: text});
-                        envz.push(env);
+                        let act = Action::Private{ from: *uid, to: *tgt_uid, text: text};
+                        acts.push(act);
+                        //~ let env = Env::new(Endpoint::User(*uid), Endpoint::User(*tgt_uid),
+                            //~ &Msg::Priv{ who: u.get_name().to_string(), text: text.clone()});
+                        //~ envz.push(env);
+                        //~ let echo = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                            //~ &Msg::Misc {
+                                //~ what: "priv_echo",
+                                //~ data: vec![
                     },
                 }
             },
@@ -390,6 +397,27 @@ fn process_room(
                     ustr_map.insert(mu.get_idstr().to_string(), *w);
                 } else {
                     warn!("process_room({}): Action::Rename: User {} doesn't exist.", &rid, w);
+                }
+            },
+            
+            Action::Private{ from, to, text } => {
+                if let Some(src) = user_map.get(from) {
+                    let env = Env::new(Endpoint::User(*from), Endpoint::User(*to),
+                        &Msg::Priv{ who: src.get_name().to_string(), text: text.clone() });
+                    envz.push(env);
+                } else {
+                    warn!("process_room({}): Action::Private: User {} doesn't exist.", &rid, from);
+                }
+                if let Some(dest) = user_map.get(to) {
+                    let env = Env::new(Endpoint::Server, Endpoint::User(*from),
+                        &Msg::Misc{
+                            what: "priv_echo".to_string(),
+                            data: vec![dest.get_name().to_string(), text.clone()],
+                            alt: format!("$ You @ {}: {}", dest.get_name().to_string(), text),
+                        });
+                    envz.push(env);
+                } else {
+                    warn!("process_room({}): Action::Private: User {} doesn't exist.", &rid, to);
                 }
             },
             
