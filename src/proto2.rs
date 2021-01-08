@@ -78,7 +78,7 @@ pub enum Msg {
     
     Current Misc variants:
     
-    ```
+    ``` ignore
     // in response to a Query { what: "roster". ... }
     Misc {
         what: "roster".to_string(),
@@ -221,7 +221,7 @@ mod test {
         println!("Msg::Priv variant");
         let m = Msg::Priv {
             who: String::from("naggum"),
-            text: "XML is bascially the Hitler of protocols.",
+            text: String::from("XML is bascially the Hitler of protocols."),
         };
         test_serde(&m);
         
