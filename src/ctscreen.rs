@@ -141,7 +141,7 @@ impl Screen {
             }
         };
         
-        Screen {
+        Ok(Screen {
             lines: Vec::new(), input: Vec::new(), roster: Vec::new(),
             roster_width: roster_chars, input_ip: 0,
             stat_ul: Line::new(), stat_ur: Line::new(),
@@ -153,7 +153,7 @@ impl Screen {
             last_x_size: x, last_y_size: y,
             styles: Styles::default(),
             bits: new_bits,
-        }
+        })
     }
     
     /** Return a reference to the `Styles` struct that contains the styles

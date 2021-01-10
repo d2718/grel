@@ -190,13 +190,6 @@ fn process_room(
                     Some(tgt_uid) => {
                         let act = Action::Private{ from: *uid, to: *tgt_uid, text: text};
                         acts.push(act);
-                        //~ let env = Env::new(Endpoint::User(*uid), Endpoint::User(*tgt_uid),
-                            //~ &Msg::Priv{ who: u.get_name().to_string(), text: text.clone()});
-                        //~ envz.push(env);
-                        //~ let echo = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                            //~ &Msg::Misc {
-                                //~ what: "priv_echo",
-                                //~ data: vec![
                     },
                 }
             },
@@ -287,6 +280,26 @@ fn process_room(
                             env = Env::new(Endpoint::Server, Endpoint::User(*uid),
                                 &Msg::Misc {
                                     what: "who".to_string(),
+                                    data: matches,
+                                    alt: altstr,
+                                }
+                            );
+                        }
+                        envz.push(env);
+                    },
+                    "rooms" => {
+                        let match_name = ascollapse(&v);
+                        let matches = match_string(&match_name, rstr_map);
+                        let env: Env;
+                        if matches.len() == 0 {
+                            env = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                                &Msg::Info(format!("No rooms matching the pattern \"{}\".", &match_name)));
+                        } else {
+                            let mut altstr = String::from("Matching rooms: ");
+                            append_comma_delimited_list(&mut altstr, &matches);
+                            env = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                                &Msg::Misc {
+                                    what: "rooms".to_string(),
                                     data: matches,
                                     alt: altstr,
                                 }

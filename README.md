@@ -79,7 +79,8 @@ their default values) are
 The client's operation is _modal_ (_a la_ `vi`). Because I am more
 sympathetic than Bill Joy, the client launches in _input_ mode, where text you
 type gets added to the input line and sent to the server when you hit return.
-This is indicated by the `Ipt` in the lower-left-hand corner.
+This is indicated by the `Ipt` in the lower-left-hand corner. In this made,
+the backspace, delete, and horizontal arrow keys act as you'd expect.
 
 Hitting escape (or backspace when the input line is empty) will put you in
 _command_ mode (indicated by `Com` in the lower-left-hand corner), where you
@@ -107,6 +108,14 @@ example,
   * `;priv somedude Come join tracksoftheworld.` will send the message
     "Come join tracksoftheworld" to the user whose name matches `somedude`
     (if that user exists).
+    
+  * `;who xxx` will request a list of all connected users whose names start
+    with a case-and-whitespace-insensitive match of `xxx`. A plain `;who`
+    with no text to match will return a list of all users.
+
+  * `;rooms xxx` will, like `;who` above, request a list of all extant Room
+    names that begin with a case-and-whitespace-insensitive match of `xxx`.
+    A plain `;rooms` with no text to match will return a list of all Rooms.
 
 ### Server Instructions
 
@@ -167,11 +176,15 @@ and you may want to redirect `stdout` to a specific file.
 
   * ~~Switch client from using the excellent
     [`termion`](https://github.com/redox-os/termion) to the cross-platform
-    [`crossterm'](https://github.com/crossterm-rs/crossterm) crate.~~ done
+    [`crossterm`](https://github.com/crossterm-rs/crossterm) crate.~~ done
     2021-01-10, and now the client builds and runs on Windows
 
-  * The client should respond to `;who PARTIAL_NAME` input with the appropriate
-    request (and then display the response properly).
+  * ~~The client should respond to `;who PARTIAL_NAME` input with the appropriate
+    request (and then display the response properly).~~ done 2021-01-10; also
+    both the server and client behave appropriately to the analagous
+    `;rooms PARTIAL_NAME` request to list matching room names. The client
+    doesn't have a specialized way to display these, though; it just displays
+    the `Msg::Misc.alt` response.
 
   * A bunch of command-mode functionality needs to be implemented, like
     scrolling the various panes and resizing the roster window. (Some of this
