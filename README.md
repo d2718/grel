@@ -151,6 +151,9 @@ and you may want to redirect `stdout` to a specific file.
     exercise certain regulatory influence over their Rooms, like muting
     or ejecting specific users.
 
+  * Users should be able to query the server for a full list/pattern-matching
+    list of Room names.
+
   * Eventually, I would like things like blocks/mutes/bans to be IP-specific,
     but that will require saving more state, and interacting more heavily
     with socket addresses.
@@ -162,12 +165,19 @@ and you may want to redirect `stdout` to a specific file.
     terminal size every time through its loop to detect changes.~~
     done 2020-12-30
 
+  * ~~Switch client from using the excellent
+    [`termion`](https://github.com/redox-os/termion) to the cross-platform
+    [`crossterm'](https://github.com/crossterm-rs/crossterm) crate.~~ done
+    2021-01-10, and now the client builds and runs on Windows
+
   * The client should respond to `;who PARTIAL_NAME` input with the appropriate
     request (and then display the response properly).
 
   * A bunch of command-mode functionality needs to be implemented, like
     scrolling the various panes and resizing the roster window. (Some of this
     is done; some isn't.)
+    
+  * The configuration of the client should involve user-customizable colors.
 
 I am happy to entertain feature requests, but simplicity is a goal.
 

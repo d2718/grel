@@ -3,7 +3,9 @@ grel.rs
 
 The `grel` terminal client.
 
-updated 2020-12-30
+Updated to use `crossterm` instead of `termion`.
+
+updated 2021-01-08
 */
 
 use lazy_static::lazy_static;
@@ -12,15 +14,19 @@ use std::io::stdout;
 use std::net::TcpStream;
 use std::time::{Instant};
 
-use termion::input::TermRead;
-use termion::event::{Event, Key};
-use termion::raw::IntoRawMode;
+//~ use termion::input::TermRead;
+//~ use termion::event::{Event, Key};
+//~ use termion::raw::IntoRawMode;
+
+use crossterm::{event, event::Event, event::KeyCode };
 
 use grel::proto2::Msg;
 use grel::sock::Sock;
 use grel::config::ClientConfig;
-use grel::line::{Line, Style};
-use grel::screen::Screen;
+use grel::ctline::Line;
+use grel::ctscreen::Screen;
+
+const JIFFY: std::time::Duration = std::time::Duration::from_millis(0);
 
 lazy_static!{
     static ref PING: Vec<u8> = Msg::Ping.bytes();
@@ -135,40 +141,6 @@ fn connect(cfg: &ClientConfig) -> Result<Sock, String> {
     return Ok(thesock);
 }
 
-/** This function splits a "command line" (one starting with the command
-character) into the command token and the rest of the line.
-
-It is written this way to avoid pulling in the whole regex crate.
-*/
-//~ fn parse_command_line(ipt: &[char]) -> (String, String) {
-    //~ let mut cmd = String::new();
-    //~ let mut arg = String::new();
-    
-    //~ let mut ipt_iter = ipt.iter();
-    //~ let _ = ipt_iter.next();        // discard command char
-    
-    //~ while let Some(c) = ipt_iter.next() {
-        //~ if c.is_whitespace() {
-            //~ break;
-        //~ } else {
-            //~ for x in c.to_lowercase() { cmd.push(x); }
-        //~ }
-    //~ }
-    
-    //~ while let Some(c) = ipt_iter.next() {
-        //~ if c.is_whitespace() {
-            //~ // skip it
-        //~ } else {
-            //~ arg.push(*c);
-            //~ break;
-        //~ }
-    //~ }
-    
-    //~ while let Some(c) = ipt_iter.next() { arg.push(*c); }
-    
-    //~ return (cmd, arg);
-//~ }
-
 /** Divide &str s into alternating chunks of whitespace and non-whitespace. */
 fn tokenize_the_whitespace_too<'a>(s: &'a str) -> Vec<&'a str> {
     let mut v: Vec<&str> = Vec::new();
@@ -235,7 +207,7 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                     if cmd_toks.len() < 3 {
                         let mut sl = Line::new();
                         sl.pushf("# You must specify a recipient for a private message.",
-                                 scrn.bfg(), scrn.bbg(), Style::None);
+                                 &scrn.styles().dim);
                         scrn.push_line(sl);
                     } else {
                         let targ = cmd_toks[2].to_string();
@@ -262,8 +234,8 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 
                 x @ _ => {
                     let mut sl = Line::new();
-                    sl.pushf("# Unknown command ", scrn.bfg(), scrn.bbg(), Style::None);
-                    sl.pushf(x, scrn.bfg(), scrn.bbg(), Style::Bold);
+                    sl.pushf("# Unknown command ", &scrn.styles().dim);
+                    sl.pushf(x, &scrn.styles().dim_bold);
                     scrn.push_line(sl);
                 },
             }
@@ -289,77 +261,89 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
     gv.socket.enqueue(&b);
 }
 
-/** Respond to key presses when in "command" mode.
-
-Returns the mode the client should be in after processing this event.
-*/
-fn process_command(evt: Event, scrn: &mut Screen, gv: &mut Globals) -> Mode {
-    trace!("process_command(...): rec'd: {:?}", &evt);
-    match evt {
-        Event::Mouse(_) => {
-            debug!("Mouse events aren't supported.");
-            return Mode::Command;
+/** Respond to keypress events in _command_ mode. */
+fn command_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
+    match evt.code {
+        KeyCode::Char(SPACE) | KeyCode::Enter => {
+            gv.mode = Mode::Input;
         },
-        Event::Key(k) => match k {
-            Key::Char(SPACE) | Key::Char(RETURN) => {
-                return Mode::Input;
-            },
-            Key::Up   => { scrn.scroll_lines(1); },
-            Key::Down => { scrn.scroll_lines(-1); },
-            Key::PageUp => {
-                let jump = (scrn.get_main_height() as i16) - 1;
-                scrn.scroll_lines(jump);
-            },
-            Key::PageDown => {
-                let jump = 1 - (scrn.get_main_height() as i16);
-                scrn.scroll_lines(jump);
-            },
-            Key::Char('q') => {
-                let m = Msg::logout("quit...");
-                gv.socket.enqueue(&m.bytes());
-            },
-            e @ _ => { debug!("process_command(...): {:?} ignored", e); },
+        KeyCode::Up   => { scrn.scroll_lines(1); },
+        KeyCode::Down => { scrn.scroll_lines(-1); },
+        KeyCode::PageUp => {
+            let jump = (scrn.get_main_height() as i16) - 1;
+            scrn.scroll_lines(jump);
         },
-        e @ _ => { debug!("process_command(...): {:?} ignored", e); },
+        KeyCode::PageDown => {
+            let jump = 1 - (scrn.get_main_height() as i16);
+            scrn.scroll_lines(jump);
+        },
+        KeyCode::Char('q') => {
+            let m = Msg::logout("quit...");
+            gv.socket.enqueue(&m.bytes());
+        },
+        _ => { debug!("command_key(...): {:?} ignored", evt); },
     }
-    
-    return Mode::Command;
 }
 
-/** Respond to key presses when in "input" mode. Mostly this involves
-adding characters to the input line or moving the insertion point on
-the input line.
+/** Respond to keypress events in _input_ mode. */
+fn input_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
+    match evt.code {
+        KeyCode::Enter => {
+            let cv = scrn.pop_input();
+            respond_to_user_input(cv, scrn, gv);
+        },
+        KeyCode::Backspace => {
+            if scrn.get_input_length() == 0 {
+                gv.mode = Mode::Command;
+            } else {
+                scrn.input_backspace();
+            }
+        },
+        KeyCode::Delete => { scrn.input_delete(); },
+        KeyCode::Left   => { scrn.input_skip_chars(-1); },
+        KeyCode::Right  => { scrn.input_skip_chars(1);  },
+        KeyCode::Esc    => { gv.mode = Mode::Command; },
+        KeyCode::Char('\u{1b}') => {
+            if evt.modifiers.contains(event::KeyModifiers::ALT) {
+                gv.mode = Mode::Command;
+            }
+        },
+        KeyCode::Char(c) => { scrn.input_char(c); },
+        _ => { debug!("input_key(...): {:?} ignored", &evt); }
+    }
+}
 
-Returns the mode the client should be in after processing this event.
+/** While the terminal polls that events are available, read them and
+act accordingly.
+
+Returns `true` if an event was read, so the calling code can know whether
+to redraw (some portion of) the screen.
 */
-fn process_input(evt: Event, scrn: &mut Screen, gv: &mut Globals) -> Mode {
-    match evt {
-        Event::Key(k) => match k {
-            Key::Char(RETURN) => {
-                let cv = scrn.pop_input();
-                respond_to_user_input(cv, scrn, gv);
-            },
-            Key::Backspace => {
-                if scrn.get_input_length() == 0 {
-                    return Mode::Command;
-                } else {
-                    scrn.input_backspace();
+fn process_user_typing(
+    scrn: &mut Screen,
+    gv: &mut Globals,
+) -> crossterm::Result<bool> {
+    let mut should_refresh: bool = false;
+    
+    while event::poll(JIFFY)? {
+        let cur_mode = gv.mode;
+        
+        match event::read()? {
+            Event::Key(evt) => {
+                match gv.mode {
+                    Mode::Command => command_key(evt, scrn, gv),
+                    Mode::Input   => input_key(evt, scrn, gv),
                 }
             },
-            Key::Delete =>    { scrn.input_delete(); },
-            Key::Left =>      { scrn.input_skip_chars(-1); },
-            Key::Right =>     { scrn.input_skip_chars(1); },
-            Key::Esc | Key::Alt('\u{1b}')=> { return Mode::Command; },
-            Key::Char(c) =>   { scrn.input_char(c); },
-            e @ _ => { debug!("process_insert(...): {:?} ignored", e); },
-        },
-        Event::Mouse(_) => {
-            debug!("Mouse events aren't supported.");
-        },
-        e @ _ => { debug!("process_insert(...): {:?} ignored", e); },
+            Event::Resize(w, h) => scrn.resize(w, h),
+            Event::Mouse(evt) => debug!("Mouse events not supported: {:?}", evt),
+        }
+        
+        if cur_mode != gv.mode { write_mode_line(scrn, gv); }
+        should_refresh = true;
     }
     
-    return Mode::Input;
+    return Ok(should_refresh);
 }
 
 /** When the Sock coughs up a Msg, this function decides what to do with it.
@@ -377,7 +361,7 @@ fn process_msg(m: Msg,
         Msg::Text { who, lines } => {
             for lin in &lines {
                 let mut sl = Line::new();
-                sl.pushf(&who, scrn.hfg(), scrn.hbg(), Style::None);
+                sl.pushf(&who, &scrn.styles().high);
                 sl.push(": ");
                 sl.push(lin);
                 scrn.push_line(sl);
@@ -387,7 +371,7 @@ fn process_msg(m: Msg,
         Msg::Priv { who, text } => {
             let mut sl = Line::new();
             sl.push("$ ");
-            sl.pushf(&who, scrn.bfg(), scrn.bbg(), Style::None);
+            sl.pushf(&who, &scrn.styles().dim);
             sl.push(": ");
             sl.push(&text);
             scrn.push_line(sl);
@@ -400,15 +384,15 @@ fn process_msg(m: Msg,
         
         Msg::Info(s) => {
             let mut sl = Line::new();
-            sl.pushf("* ", None, None, Style::None);
-            sl.pushf(&s, None, None, Style::None);
+            sl.push("* ");
+            sl.push(&s);
             scrn.push_line(sl);
         },
 
         Msg::Err(s) => {
             let mut sl = Line::new();
-            sl.pushf("# ", scrn.bfg(), scrn.bbg(), Style::None);
-            sl.pushf(&s, scrn.bfg(), scrn.bbg(), Style::None);
+            sl.pushf("# ", &scrn.styles().dim);
+            sl.pushf(&s, &scrn.styles().dim);
             scrn.push_line(sl);
         },
         
@@ -421,20 +405,20 @@ fn process_msg(m: Msg,
                 let mut sl = Line::new();
                 sl.push("* ");
                 if name.as_str() == gv.uname.as_str() {
-                    sl.pushf("You", None, None, Style::Bold);
+                    sl.pushf("You", &scrn.styles().bold);
                     sl.push(" join ");
-                    if let Some(room) = data.get(1) {
-                        gv.rname = room.clone();
+                    if let Some(rm) = data.get(1) {
+                        gv.rname = rm.clone();
                         let mut room_line = Line::new();
-                        room_line.pushf(&gv.rname, scrn.hfg(), scrn.hbg(), Style::None);
+                        room_line.pushf(&gv.rname, &scrn.styles().high);
                         scrn.set_stat_ur(room_line);
                     }
                 } else {
-                    sl.pushf(name, scrn.hfg(), scrn.hbg(), Style::None);
+                    sl.pushf(name, &scrn.styles().high);
                     sl.push(" joins ");
                 }
-                if let Some(room) = data.get(1) {
-                    sl.pushf(room, scrn.hfg(), scrn.hbg(), Style::None);
+                if let Some(rm) = data.get(1) {
+                    sl.pushf(rm, &scrn.styles().high);
                 } else {
                     sl.push("the server");
                 }
@@ -454,7 +438,7 @@ fn process_msg(m: Msg,
                 };
                 let mut sl = Line::new();
                 sl.push("* ");
-                sl.pushf(name, scrn.hfg(), scrn.hbg(), Style::None);
+                sl.pushf(name, &scrn.styles().high);
                 sl.push(" leaves: ");
                 sl.push(message);
                 gv.socket.enqueue(&ROSTER_REQUEST);
@@ -472,9 +456,9 @@ fn process_msg(m: Msg,
                 };
                 let mut sl = Line::new();
                 sl.push("$ ");
-                sl.pushf("You", scrn.bfg(), scrn.bbg(), Style::Bold);
-                sl.pushf(" @ ", scrn.bfg(), scrn.bbg(), Style::None);
-                sl.pushf(&name, scrn.hfg(), scrn.hbg(), Style::None);
+                sl.pushf("You", &scrn.styles().dim_bold);
+                sl.pushf(" @ ", &scrn.styles().dim);
+                sl.pushf(&name, &scrn.styles().high);
                 sl.push(": ");
                 sl.push(&text);
                 scrn.push_line(sl);
@@ -493,15 +477,15 @@ fn process_msg(m: Msg,
                 let mut sl = Line::new();
                 sl.push("* ");
                 if old.as_str() == gv.uname.as_str() {
-                    sl.pushf("You", None, None, Style::Bold);
+                    sl.pushf("You", &scrn.styles().bold);
                     sl.push(" are now known as ");
                     gv.uname = new.clone();
                     write_mode_line(scrn, gv);
                 } else {
-                    sl.pushf(old, scrn.hfg(), scrn.hbg(), Style::None);
+                    sl.pushf(old, &scrn.styles().high);
                     sl.push(" is now known as ");
                 }
-                sl.pushf(new, scrn.hfg(), scrn.hbg(), Style::None);
+                sl.pushf(new, &scrn.styles().high);
                 sl.push(".");
                 scrn.push_line(sl);
                 gv.socket.enqueue(&ROSTER_REQUEST);
@@ -551,17 +535,16 @@ fn process_msg(m: Msg,
 this updates it.
 */
 fn write_mode_line(scrn: &mut Screen, gv: &Globals) {
-    let none = grel::line::Style::None;
     let mut mode_line = Line::new();
     let mch: &str = match gv.mode {
         Mode::Command => "Com",
         Mode::Input => "Ipt",
     };
-    mode_line.pushf(mch, scrn.hfg(), scrn.hbg(), none);
-    mode_line.pushf(" | ", scrn.bfg(), scrn.bbg(), none);
-    mode_line.pushf(&(gv.uname), scrn.hfg(), scrn.hbg(), none);
+    mode_line.pushf(mch, &scrn.styles().high);
+    mode_line.pushf(" | ", &scrn.styles().dim);
+    mode_line.pushf(&(gv.uname), &scrn.styles().high);
     mode_line.push(" @ ");
-    mode_line.pushf(&(gv.local_addr), scrn.hfg(), scrn.hbg(), none);
+    mode_line.pushf(&(gv.local_addr), &scrn.styles().high);
     scrn.set_stat_ll(mode_line);
 }
 
@@ -606,14 +589,20 @@ fn main() {
     };
     
     {
-        let mut term = stdout().into_raw_mode().unwrap();
-        let mut scrn: Screen = Screen::new(&mut term, cfg.roster_width);
-        let mut evt_iter = termion::async_stdin().events();
+        let mut term = stdout();
+        let mut scrn: Screen = match Screen::new(&mut term, cfg.roster_width){
+            Ok(x) => x,
+            Err(e) => {
+                println!("Error setting up terminal: {}", e);
+                std::process::exit(1);
+            },
+        };
+        
         let mut addr_line = Line::new();
-        addr_line.pushf(&gv.server_addr, scrn.hfg(), scrn.hbg(), Style::None);
+        addr_line.pushf(&gv.server_addr, &scrn.styles().high);
         scrn.set_stat_ul(addr_line);
         let mut room_line = Line::new();
-        room_line.pushf(&gv.rname, scrn.hfg(), scrn.hbg(), Style::None);
+        room_line.pushf(&gv.rname, &scrn.styles().high);
         scrn.set_stat_ur(room_line);
         write_mode_line(&mut scrn, &gv);
         
@@ -623,29 +612,19 @@ fn main() {
         'main_loop: loop {
             let loop_start = Instant::now();
             
-            /* Read any input that has piled up since the last iteration
-            of `main_loop. */
-            while let Some(r) = evt_iter.next() {
-                match r {
+            'input_loop: loop {
+                match process_user_typing(&mut scrn, &mut gv) {
                     Err(e) => {
-                        gv.messages.push(format!("{}", e));
+                        gv.messages.push(format!("Error getting event from keyboard: {}", e));
                         break 'main_loop;
                     },
-                    Ok(e) => {
-                        trace!("read loop: .next() -> {:?}", &e);
-                        let cur_mode = gv.mode;
-                        let new_mode = match cur_mode {
-                            Mode::Command => process_command(e, &mut scrn, &mut gv),
-                            Mode::Input => process_input(e, &mut scrn, &mut gv),
-                        };
-                        if new_mode != cur_mode {
-                            gv.mode = new_mode;
-                            write_mode_line(&mut scrn, &gv);
+                    Ok(true) => {
+                        if let Err(e) = scrn.refresh(&mut term) {
+                            gv.messages.push(format!("Error refreshing screen: {}", e));
+                            break 'main_loop;
                         }
-                            
-                        trace!("main loop: mode: {:?}", &gv.mode);
-                        scrn.refresh(&mut term);
                     },
+                    Ok(false) => { break 'input_loop; },
                 }
             }
             
@@ -703,14 +682,13 @@ fn main() {
                 scrn.prune_scrollback(cfg.min_scrollback);
             }
             
-            /* Check for terminal resize every iteration; if the size hasn't
-            changed, `Screen::auto_resize()` doesn't do anything else. */
-            scrn.auto_resize();
-            
             /* If there are any changes to the state of the screen (I think
             everything but the receipt/sending of a `Msg::Ping` does this),
             redraw the areas that changed. */
-            scrn.refresh(&mut term);
+            if let Err(e) = scrn.refresh(&mut term) {
+                gv.messages.push(format!("Error refreshing screen: {}", e));
+                break 'main_loop;
+            }
             
             /* If less than the configured tick time has elapsed, sleep for
             the rest of the tick. This will probably happen unless there's a

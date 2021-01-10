@@ -81,6 +81,7 @@ impl Room {
     pub fn get_users(&self) -> &[u64] { &(self.users) }
 }
 
+#[cfg(debug)]
 impl Drop for Room {
     fn drop(&mut self) {
         if DEBUG { println!("Room {} ({}) dropping.", self.idn, &(self.name)); }

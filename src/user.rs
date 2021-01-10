@@ -328,6 +328,7 @@ impl User {
     }
 }
 
+#[cfg(debug)]
 impl Drop for User {
     fn drop(&mut self) {
         if DEBUG {
