@@ -18,7 +18,7 @@ local json   = require 'dkjson'
 local argz   = require 'dargs'
 local dfmt   = require 'dfmt'
 
-local ADDR = '127.0.0.1'
+local ADDR = '104.168.201.111'
 --local ADDR = '192.168.1.13'
 local PORT = 51516
 -- Number of bytes to attempt to read on each read from the socket.
@@ -383,6 +383,8 @@ local function handle_user_input(line, screen)
             t = { ['Query'] = { ['what'] = 'roster', arg = '_'}, }
         elseif cmd == ';who' then
             t = { ['Query'] = { ['what'] = 'who', arg = rest, },  }
+        elseif cmd == ';rooms' then
+            t = { ['Query'] = { ['what'] = 'rooms', arg = rest, }, }
         else
             add_line(string.format('# Error: Unrecognized command: %s', cmd))
             paint_lines(screen)
