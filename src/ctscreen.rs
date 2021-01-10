@@ -108,12 +108,12 @@ pub struct Screen {
 }
 
 impl Screen {
-    pub fn new(term: &mut Stdout, roster_chars: u16) -> Screen {
-        terminal::enable_raw_mode().unwrap();
-        let (x, y): (u16, u16) = terminal::size().unwrap();
-        term.queue(cursor::Hide).unwrap()
-            .queue(terminal::DisableLineWrap).unwrap();
-        term.flush().unwrap();
+    pub fn new(term: &mut Stdout, roster_chars: u16) -> crossterm::Result<Screen> {
+        terminal::enable_raw_mode()?;
+        let (x, y): (u16, u16) = terminal::size()?;
+        term.queue(cursor::Hide)?
+            .queue(terminal::DisableLineWrap)?;
+        term.flush()?;
         
         let new_bits = {
             let mut start = Line::new();
@@ -319,14 +319,6 @@ impl Screen {
             self.last_x_size = cols;
             self.last_y_size = rows;
         }
-    }
-    
-    /** Automatically set the size of the `Screen` to be the whole
-    terminal window.
-    */
-    pub fn auto_resize(&mut self) {
-        let (x, y): (u16, u16) = crossterm::terminal::size().unwrap();
-        self.resize(x, y);
     }
     
     fn refresh_lines(

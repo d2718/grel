@@ -3,7 +3,9 @@ grel.rs
 
 The `grel` terminal client.
 
-updated 2020-12-30
+Updated to use `crossterm` instead of `termion`.
+
+updated 2021-01-08
 */
 
 use lazy_static::lazy_static;
@@ -259,79 +261,7 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
     gv.socket.enqueue(&b);
 }
 
-/** Respond to key presses when in "command" mode.
-
-Returns the mode the client should be in after processing this event.
-*/
-//~ fn process_command(evt: Event, scrn: &mut Screen, gv: &mut Globals) -> Mode {
-    //~ trace!("process_command(...): rec'd: {:?}", &evt);
-    //~ match evt {
-        //~ Event::Mouse(_) => {
-            //~ debug!("Mouse events aren't supported.");
-            //~ return Mode::Command;
-        //~ },
-        //~ Event::Key(k) => match k {
-            //~ Key::Char(SPACE) | Key::Char(RETURN) => {
-                //~ return Mode::Input;
-            //~ },
-            //~ Key::Up   => { scrn.scroll_lines(1); },
-            //~ Key::Down => { scrn.scroll_lines(-1); },
-            //~ Key::PageUp => {
-                //~ let jump = (scrn.get_main_height() as i16) - 1;
-                //~ scrn.scroll_lines(jump);
-            //~ },
-            //~ Key::PageDown => {
-                //~ let jump = 1 - (scrn.get_main_height() as i16);
-                //~ scrn.scroll_lines(jump);
-            //~ },
-            //~ Key::Char('q') => {
-                //~ let m = Msg::logout("quit...");
-                //~ gv.socket.enqueue(&m.bytes());
-            //~ },
-            //~ e @ _ => { debug!("process_command(...): {:?} ignored", e); },
-        //~ },
-        //~ e @ _ => { debug!("process_command(...): {:?} ignored", e); },
-    //~ }
-    
-    //~ return Mode::Command;
-//~ }
-
-/** Respond to key presses when in "input" mode. Mostly this involves
-adding characters to the input line or moving the insertion point on
-the input line.
-
-Returns the mode the client should be in after processing this event.
-*/
-//~ fn process_input(evt: Event, scrn: &mut Screen, gv: &mut Globals) -> Mode {
-    //~ match evt {
-        //~ Event::Key(k) => match k {
-            //~ Key::Char(RETURN) => {
-                //~ let cv = scrn.pop_input();
-                //~ respond_to_user_input(cv, scrn, gv);
-            //~ },
-            //~ Key::Backspace => {
-                //~ if scrn.get_input_length() == 0 {
-                    //~ return Mode::Command;
-                //~ } else {
-                    //~ scrn.input_backspace();
-                //~ }
-            //~ },
-            //~ Key::Delete =>    { scrn.input_delete(); },
-            //~ Key::Left =>      { scrn.input_skip_chars(-1); },
-            //~ Key::Right =>     { scrn.input_skip_chars(1); },
-            //~ Key::Esc | Key::Alt('\u{1b}')=> { return Mode::Command; },
-            //~ Key::Char(c) =>   { scrn.input_char(c); },
-            //~ e @ _ => { debug!("process_insert(...): {:?} ignored", e); },
-        //~ },
-        //~ Event::Mouse(_) => {
-            //~ debug!("Mouse events aren't supported.");
-        //~ },
-        //~ e @ _ => { debug!("process_insert(...): {:?} ignored", e); },
-    //~ }
-    
-    //~ return Mode::Input;
-//~ }
-
+/** Respond to keypress events in _command_ mode. */
 fn command_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
     match evt.code {
         KeyCode::Char(SPACE) | KeyCode::Enter => {
@@ -355,6 +285,7 @@ fn command_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
     }
 }
 
+/** Respond to keypress events in _input_ mode. */
 fn input_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
     match evt.code {
         KeyCode::Enter => {
@@ -382,6 +313,12 @@ fn input_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
     }
 }
 
+/** While the terminal polls that events are available, read them and
+act accordingly.
+
+Returns `true` if an event was read, so the calling code can know whether
+to redraw (some portion of) the screen.
+*/
 fn process_user_typing(
     scrn: &mut Screen,
     gv: &mut Globals,
@@ -653,12 +590,14 @@ fn main() {
     
     {
         let mut term = stdout();
-        let mut scrn: Screen = Screen::new(&mut term, cfg.roster_width);
+        let mut scrn: Screen = match Screen::new(&mut term, cfg.roster_width){
+            Ok(x) => x,
+            Err(e) => {
+                println!("Error setting up terminal: {}", e);
+                std::process::exit(1);
+            },
+        };
         
-        //
-        // TODO: This.
-        //
-        // let mut evt_iter = termion::async_stdin().events();
         let mut addr_line = Line::new();
         addr_line.pushf(&gv.server_addr, &scrn.styles().high);
         scrn.set_stat_ul(addr_line);
@@ -672,32 +611,6 @@ fn main() {
         */
         'main_loop: loop {
             let loop_start = Instant::now();
-            
-            /* Read any input that has piled up since the last iteration
-            of `main_loop. */
-            //~ while let Some(r) = evt_iter.next() {
-                //~ match r {
-                    //~ Err(e) => {
-                        //~ gv.messages.push(format!("{}", e));
-                        //~ break 'main_loop;
-                    //~ },
-                    //~ Ok(e) => {
-                        //~ trace!("read loop: .next() -> {:?}", &e);
-                        //~ let cur_mode = gv.mode;
-                        //~ let new_mode = match cur_mode {
-                            //~ Mode::Command => process_command(e, &mut scrn, &mut gv),
-                            //~ Mode::Input => process_input(e, &mut scrn, &mut gv),
-                        //~ };
-                        //~ if new_mode != cur_mode {
-                            //~ gv.mode = new_mode;
-                            //~ write_mode_line(&mut scrn, &gv);
-                        //~ }
-                            
-                        //~ trace!("main loop: mode: {:?}", &gv.mode);
-                        //~ scrn.refresh(&mut term);
-                    //~ },
-                //~ }
-            //~ }
             
             'input_loop: loop {
                 match process_user_typing(&mut scrn, &mut gv) {
@@ -768,10 +681,6 @@ fn main() {
             if scrn.get_scrollback_length() > cfg.max_scrollback {
                 scrn.prune_scrollback(cfg.min_scrollback);
             }
-            
-            /* Check for terminal resize every iteration; if the size hasn't
-            changed, `Screen::auto_resize()` doesn't do anything else. */
-            scrn.auto_resize();
             
             /* If there are any changes to the state of the screen (I think
             everything but the receipt/sending of a `Msg::Ping` does this),

@@ -119,6 +119,7 @@ pub struct Line {
 }
 
 impl Line {
+    /** Instantiate a new, empty `Line`. */
     pub fn new() -> Line {
         Line {
             chars: Vec::new(),
@@ -130,14 +131,17 @@ impl Line {
         }
     }
     
+    /** Return the number of characters in the `Line`. */
     pub fn len(&self) -> usize { self.chars.len() }
     
+    /** Add a chunk of unformatted text to the end of the `Line`. */
     pub fn push<T: AsRef<str>>(&mut self, s: T) {
         self.width = None;
         self.nchars = None;
         for c in s.as_ref().chars() { self.chars.push(c); }
     }
     
+    /** Add a chunk of _formatted_ text to the end of the `Line`. */
     pub fn pushf<T: AsRef<str>>(&mut self, s: T, styl: &Style) {
         self.width = None;
         self.nchars = None;
@@ -151,6 +155,7 @@ impl Line {
         self.fdirs.push(Fmtr::new(n, &NOSTYLE));
     }
     
+    /** Append a copy of the contents of `other` to `self`. */
     pub fn append(&mut self, other: &Self) {
         self.width = None;
         self.nchars = None;

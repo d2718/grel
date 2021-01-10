@@ -6,7 +6,6 @@ pub mod config;
 pub mod proto2;
 
 // New crossterm module versions.
-#[allow(dead_code)]
 pub mod ctline;
 pub mod ctscreen;
 
