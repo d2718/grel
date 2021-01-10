@@ -160,8 +160,8 @@ and you may want to redirect `stdout` to a specific file.
     exercise certain regulatory influence over their Rooms, like muting
     or ejecting specific users.
 
-  * Users should be able to query the server for a full list/pattern-matching
-    list of Room names.
+  * ~~Users should be able to query the server for a full list/pattern-matching
+    list of Room names.~~ done 2021-01-10
 
   * Eventually, I would like things like blocks/mutes/bans to be IP-specific,
     but that will require saving more state, and interacting more heavily
