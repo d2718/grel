@@ -217,7 +217,18 @@ impl ClientConfig {
     }
     
     pub fn generate() -> Result<String, String> {
-        let cfg = ClientConfigFile::default();
+        let cfg = ClientConfigFile {
+            address:        Some(String::from(ADDR)),
+            name:           Some(String::from(NAME)),
+            timeout_ms:     Some(CLIENT_TICK),
+            block_ms:       Some(BLOCK_TIMEOUT),
+            read_size:      Some(READ_SIZE),
+            roster_width:   Some(ROSTER_WIDTH),
+            cmd_char:       Some(CMD_CHAR),
+            max_scrollback: Some(MAX_SCROLLBACK),
+            min_scrollback: Some(MIN_SCROLLBACK),
+        };
+        
         if let Err(e) = confy::store("grel", cfg) {
             return Err(format!("Error writing new configuration file: {}", e));
         }
