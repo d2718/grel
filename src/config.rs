@@ -67,8 +67,8 @@ impl std::default::Default for ServerConfigFile {
     }
 }
 
-/** The `GrelConfig` struct holds data read (and interpreted) from a
-configuration file as public members.
+/** The `ServerConfig` struct holds data read (and interpreted) from a
+server configuration file as public members.
 */
 #[derive(Debug)]
 pub struct ServerConfig {
@@ -128,33 +128,36 @@ impl ServerConfig {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ClientConfigFile {
-    address:        String,
-    name:           String,
-    timeout_ms:     u64,
-    block_ms:       u64,
-    read_size:      usize,
-    roster_width:   u16,
-    cmd_char:       char,
-    max_scrollback: usize,
-    min_scrollback: usize,
+    address:        Option<String>,
+    name:           Option<String>,
+    timeout_ms:     Option<u64>,
+    block_ms:       Option<u64>,
+    read_size:      Option<usize>,
+    roster_width:   Option<u16>,
+    cmd_char:       Option<char>,
+    max_scrollback: Option<usize>,
+    min_scrollback: Option<usize>,
 }
 
 impl std::default::Default for ClientConfigFile {
     fn default() -> Self {
         Self {
-            address: String::from(ADDR),
-            name:    String::from(NAME),
-            timeout_ms:    CLIENT_TICK,
-            block_ms:      BLOCK_TIMEOUT,
-            read_size:     READ_SIZE,
-            roster_width:  ROSTER_WIDTH,
-            cmd_char:      CMD_CHAR,
-            max_scrollback: MAX_SCROLLBACK,
-            min_scrollback: MIN_SCROLLBACK,
+            address:        None,
+            name:           None,
+            timeout_ms:     None,
+            block_ms:       None,
+            read_size:      None,
+            roster_width:   None,
+            cmd_char:       None,
+            max_scrollback: None,
+            min_scrollback: None,
         }
     }
 }
 
+/** The `ClientConfig` struct holds data read (and interpreted) from a
+client configuration file as public members.
+*/
 #[derive(Debug)]
 pub struct ClientConfig {
     pub address:        String,
@@ -187,23 +190,27 @@ impl ClientConfig {
             },
         };
         
-        if f.max_scrollback < f.min_scrollback {
+        let max_scroll = f.max_scrollback.unwrap_or(MAX_SCROLLBACK);
+        let min_scroll = f.min_scrollback.unwrap_or(MIN_SCROLLBACK);
+        let cmd_char   = f.cmd_char.unwrap_or(CMD_CHAR);
+        
+        if max_scroll < min_scroll {
             return Err("max_scrollback cannot be smaller than min_scrollback".to_string());
         };
-        if (f.cmd_char as u32) > 128 {
+        if (cmd_char as u32) > 128 {
             return Err("cmd_char must be an ASCII character".to_string());
         };
         
         let cc = ClientConfig {
-            address: f.address,
-            name: f.name,
-            tick: Duration::from_millis(f.timeout_ms),
-            block: Duration::from_millis(f.block_ms),
-            read_size: f.read_size,
-            roster_width: f.roster_width,
-            cmd_char: f.cmd_char,
-            max_scrollback: f.max_scrollback,
-            min_scrollback: f.min_scrollback,
+            address:      f.address .unwrap_or(String::from(ADDR)),
+            name:         f.name    .unwrap_or(String::from(NAME)),
+            tick:  Duration::from_millis(f.timeout_ms.unwrap_or(CLIENT_TICK)),
+            block: Duration::from_millis(f.block_ms.unwrap_or(BLOCK_TIMEOUT)),
+            read_size:    f.read_size.unwrap_or(READ_SIZE),
+            roster_width: f.roster_width.unwrap_or(ROSTER_WIDTH),
+            cmd_char:       cmd_char,
+            max_scrollback: max_scroll,
+            min_scrollback: min_scroll,
         };
         
         return Ok(cc);
