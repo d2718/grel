@@ -31,6 +31,8 @@ enum Action {
     Logout { who: u64, to_who: String, to_room: String },
     Address { who: u64 },
     Private { from: u64, to: u64, text: String },
+    Block { blocker: u64, blockee: u64},
+    Unblock { blocker: u64, blockee: u64},
 }
 
 fn match_string<T>(s: &str, hash: &HashMap<String, T>) -> Vec<String> {
@@ -199,7 +201,7 @@ fn process_room(
                 acts.push(act);
             },
             
-            Msg::Join(room_name)=> {
+            Msg::Join(room_name) => {
                 let collapsed = ascollapse(&room_name);
                 debug!("process_room({}): Msg::Join: {} ({})", &rid, &room_name, &collapsed);
                 if collapsed.len() == 0 {
@@ -235,6 +237,48 @@ fn process_room(
                     acts.push(act);
                 }
 
+            },
+            
+            Msg::Block(user_name) => {
+                let collapsed = ascollapse(&user_name);
+                if collapsed.len() == 0 {
+                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                        &Msg::err("That cannot be anyone's user name."));
+                    envz.push(env);
+                    continue;
+                }
+                match ustr_map.get(&collapsed) {
+                    None => {
+                        let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                            &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
+                        envz.push(env);
+                    },
+                    Some(n) => {
+                        let act = Action::Block{ blocker: *uid, blockee: *n };
+                        acts.push(act);
+                    },
+                }
+            },
+            
+            Msg::Unblock(user_name) => {
+                let collapsed = ascollapse(&user_name);
+                if collapsed.len() == 0 {
+                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                        &Msg::err("That cannot be anyone's user name."));
+                    envz.push(env);
+                    continue;
+                }
+                match ustr_map.get(&collapsed) {
+                    None => {
+                        let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                            &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
+                        envz.push(env);
+                    },
+                    Some(n) => {
+                        let act = Action::Unblock{ blocker: *uid, blockee: *n };
+                        acts.push(act);
+                    },
+                }
             },
             
             Msg::Query { what: k, arg: v }=> {
@@ -453,6 +497,64 @@ fn process_room(
                 mr.leave(*w);
             },
             
+            Action::Block{ blocker, blockee } => {
+                let mut blocked_name: Option<String> = None;
+                if let Some(u) = user_map.get(blockee) {
+                    blocked_name = Some(u.get_name().to_string());
+                };
+                
+                if let Some(mut mu) = user_map.get_mut(blocker) {
+                    let msg: Msg;
+                    match blocked_name {
+                        None => {
+                            msg = Msg::info("There is no user with that name.");
+                        },
+                        Some(name) => {
+                            match mu.block_id(*blockee) {
+                                true => {
+                                    msg = Msg::Info(format!("You are now blocking \"{}\".", &name));
+                                },
+                                false => {
+                                    msg = Msg::Err(format!("You are already blocking \"{}\".", &name));
+                                },
+                            }
+                        }
+                    }
+                    mu.deliver_msg(&msg);
+                } else {
+                    warn!("process_room({}): Action::Block: User {} doesn't exist.", &rid, &blocker);
+                }
+            },
+            
+            Action::Unblock{ blocker, blockee } => {
+                let mut blocked_name: Option<String> = None;
+                if let Some(u) = user_map.get(blockee) {
+                    blocked_name = Some(u.get_name().to_string());
+                };
+                
+                if let Some(mut mu) = user_map.get_mut(blocker) {
+                    let msg: Msg;
+                    match blocked_name {
+                        None => {
+                            msg = Msg::info("There is no user with that name.");
+                        },
+                        Some(name) => {
+                            match mu.unblock_id(*blockee) {
+                                true => {
+                                    msg = Msg::Info(format!("You unblock \"{}\".", &name));
+                                },
+                                false => {
+                                    msg = Msg::Err(format!("You were not blocking \"{}\".", &name));
+                                },
+                            }
+                        }
+                    }
+                    mu.deliver_msg(&msg);
+                } else {
+                    warn!("process_room({}): Action::Unblock: User {} doesn't exist.", &rid, &blocker);
+                }
+            },
+            
             Action::Address{ who: w } => {
                 if let Some(mu) = user_map.get_mut(&w) {
                     let (addr_str, alt_str): (String, String) = match mu.get_addr() {
@@ -506,7 +608,23 @@ fn gen_name(init_count: u64, map: &HashMap<String, u64>) -> String {
     }
 }
 
+/** Write pidfile. This may get formalized or configurizable eventually;
+right now it just makes it easier to stop the server.
+*/
+fn write_pid() -> std::io::Result<()> {
+    use std::fs::File;
+    use std::io::Write;
+    let pidstr = format!("{}", std::process::id());
+    let mut pidf = File::create("d.pid")?;
+    pidf.write_all(pidstr.as_bytes())?;
+    return pidf.sync_all()
+}
+
 fn main() {
+    if let Err(e) = write_pid() {
+        println!("Error writing pidfile: {}", e);
+    };
+    
     let cfg: ServerConfig = ServerConfig::configure();
     println!("Configuration: {:?}", &cfg);
     WriteLogger::init(cfg.log_level, simplelog::Config::default(),

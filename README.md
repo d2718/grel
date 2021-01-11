@@ -117,6 +117,11 @@ example,
     names that begin with a case-and-whitespace-insensitive match of `xxx`.
     A plain `;rooms` with no text to match will return a list of all Rooms.
 
+  * `;block jerkuser` Will block the user whose name currently matches
+    "jerkuser" (if not already blocked).
+
+  * `;unblock jerkuser` Will unblock same, if blocked.
+
 ### Server Instructions
 
 The server configuration on my machine is at `~/.config/greld/greld.toml`;
@@ -153,8 +158,12 @@ and you may want to redirect `stdout` to a specific file.
   * ~~Users should be able to send private messages to each other.~~ done
     2021-01-03
 
-  * Users should be able to "block" specific other users and not see their
-    messages
+  * ~~Users should be able to "block" specific other users and not see their
+    messages~~ done 2021-01-11, although in its current state, it's pretty
+    flimsy. A blocked user can circumvent the block by logging off and
+    immediately on again. (See the item below about blocks/bans being
+    IP-specific. I'm not really sure how to implement this yet without
+    adding more complexity than I'd like.)
 
   * Room ("channel" in the classic IRC sense) operators should be able to
     exercise certain regulatory influence over their Rooms, like muting
