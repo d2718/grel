@@ -101,7 +101,6 @@ pub struct Screen {
     bits: Bits,
     
     lines_scroll: u16,
-    lines_scroll_line_n: usize,
     roster_scroll: u16,
     last_x_size: u16,
     last_y_size: u16,
@@ -149,7 +148,6 @@ impl Screen {
             lines_dirty: true,  input_dirty: true,
             roster_dirty: true, stat_dirty: true,
             lines_scroll: 0, roster_scroll: 0,
-            lines_scroll_line_n: 0,
             last_x_size: x, last_y_size: y,
             styles: Styles::default(),
             bits: new_bits,

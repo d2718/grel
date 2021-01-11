@@ -7,8 +7,6 @@ updated: 2020-12-28
 
 */
 
-const DEBUG: bool = true;
-
 use std::fmt::Display;
 use std::time::{Duration, Instant};
 use lazy_static::lazy_static;
