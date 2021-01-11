@@ -250,6 +250,18 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                     gv.socket.enqueue(&b);
                 },
                 
+                "block" => {
+                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
+                    let b = Msg::Block(arg).bytes();
+                    gv.socket.enqueue(&b);
+                },
+                
+                "unblock" => {
+                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
+                    let b = Msg::Unblock(arg).bytes();
+                    gv.socket.enqueue(&b);
+                },
+                
                 x @ _ => {
                     let mut sl = Line::new();
                     sl.pushf("# Unknown command ", &scrn.styles().dim);

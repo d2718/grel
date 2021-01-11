@@ -62,6 +62,13 @@ pub enum Msg {
         arg: String,
     },
     
+    /** A request from the client to block messages (including private
+    messages) from the user with the matching name. */
+    Block(String),
+    
+    /** A request to unblock the given user. */
+    Unblock(String),
+    
     // Server-to-client messages.
     
     /** A non-error, miscellaneously-informative message sent form the server
@@ -242,6 +249,14 @@ mod test {
             what: String::from("who"),
             arg: String::from("fink"),
         };
+        test_serde(&m);
+        
+        println!("Msg::Block variant");
+        let m = Msg::Block(String::from("Dickweed User"));
+        test_serde(&m);
+        
+        println!("Msg::Unblock variant");
+        let m = Msg::Unblock(String::from("Misunderstood User"));
         test_serde(&m);
         
         println!("Msg::Info variant");
