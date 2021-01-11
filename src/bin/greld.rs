@@ -254,8 +254,14 @@ fn process_room(
                         envz.push(env);
                     },
                     Some(n) => {
-                        let act = Action::Block{ blocker: *uid, blockee: *n };
-                        acts.push(act);
+                        if *n == *uid {
+                            let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
+                                &Msg::err("You shouldn't block yourself."));
+                            envz.push(env);
+                        } else {
+                            let act = Action::Block{ blocker: *uid, blockee: *n };
+                            acts.push(act);
+                        }
                     },
                 }
             },
@@ -435,10 +441,12 @@ fn process_room(
                         None => { continue; },
                         Some(u) => u,
                     };
-                    let msg = Msg::Err(format!("There is already a user named \"{}\".", ou.get_name()));
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*w), &msg);
-                    envz.push(env);
-                    continue;
+                    if *ouid != *w {
+                        let msg = Msg::Err(format!("There is already a user named \"{}\".", ou.get_name()));
+                        let env = Env::new(Endpoint::Server, Endpoint::User(*w), &msg);
+                        envz.push(env);
+                        continue;
+                    }
                 }
                 if let Some(mu) = user_map.get_mut(&w) {
                     let msg = Msg::Misc {
