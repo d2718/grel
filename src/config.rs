@@ -7,7 +7,7 @@ The `grel` configuration struct and mechanism.
 in the "usual" place (`~/.config/grel/grel.toml` is one location; you may
 need to play around with `confy` to figure out others).
 
-2020-12-24
+2021-01-11
 */
 use std::time::Duration;
 use directories::BaseDirs;
@@ -16,6 +16,8 @@ use simplelog::LevelFilter;
 const ADDR:           &str = "127.0.0.1:51516";
 const SERVER_LOG:     &str = "greld.log";
 const NAME:           &str = "grel user";
+const LOBBY_NAME:     &str = "Lobby";
+const WELCOME:        &str = "Welcome to a grel server.";
 const SERVER_TICK:     u64 = 100;
 const CLIENT_TICK:     u64 = 100;
 const BLOCK_TIMEOUT:   u64 = 5000;
@@ -38,6 +40,8 @@ struct ServerConfigFile {
     blackout_to_kick_ms: u64,
     max_user_name_length: usize,
     max_room_name_length: usize,
+    lobby_name: String,
+    welcome: String,
     log_file: String,
     log_level: u8,
 }
@@ -55,6 +59,8 @@ impl std::default::Default for ServerConfigFile {
             blackout_to_kick_ms: 10000,
             max_user_name_length: 24,
             max_room_name_length: 24,
+            lobby_name: String::from(LOBBY_NAME),
+            welcome: String::from(WELCOME),
             log_file: String::from(SERVER_LOG),
             log_level: 5,
         }
@@ -72,6 +78,8 @@ pub struct ServerConfig {
     pub blackout_time_to_kick: Duration,
     pub max_user_name_length: usize,
     pub max_room_name_length: usize,
+    pub lobby_name: String,
+    pub welcome: String,
     pub log_file: String,
     pub log_level: LevelFilter,
 }
@@ -110,6 +118,8 @@ impl ServerConfig {
             blackout_time_to_kick: Duration::from_millis(cfgf.blackout_to_kick_ms),
             max_user_name_length:  cfgf.max_user_name_length,
             max_room_name_length:  cfgf.max_room_name_length,
+            lobby_name: cfgf.lobby_name,
+            welcome: cfgf.welcome,
             log_file: cfgf.log_file,
             log_level: logl,
         }

@@ -10,8 +10,6 @@ fly from any valid, unique name, and are meant to automatically wink out of
 existence when the last person leaves.
 */
 
-const DEBUG: bool = true;
-
 use std::collections::HashMap;
 
 use super::proto2::{Env, Endpoint};

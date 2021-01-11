@@ -3,7 +3,7 @@ greld.rs
 
 The `grel` daemon (server) process.
 
-updated 2020-12-29
+updated 2021-01-11
 */
 
 use std::collections::HashMap;
@@ -503,7 +503,7 @@ fn process_room(
                     blocked_name = Some(u.get_name().to_string());
                 };
                 
-                if let Some(mut mu) = user_map.get_mut(blocker) {
+                if let Some(mu) = user_map.get_mut(blocker) {
                     let msg: Msg;
                     match blocked_name {
                         None => {
@@ -532,7 +532,7 @@ fn process_room(
                     blocked_name = Some(u.get_name().to_string());
                 };
                 
-                if let Some(mut mu) = user_map.get_mut(blocker) {
+                if let Some(mu) = user_map.get_mut(blocker) {
                     let msg: Msg;
                     match blocked_name {
                         None => {
@@ -636,7 +636,7 @@ fn main() {
     let mut room_map: HashMap<u64, Room> = HashMap::new();
     let mut rstr_map: HashMap<String, u64> = HashMap::new();
     
-    let mut lobby: Room = Room::new(0, String::from(""), 0);
+    let mut lobby: Room = Room::new(0, cfg.lobby_name.clone(), 0);
     lobby.leave(0);
     room_map.insert(0, lobby);
     
@@ -678,6 +678,8 @@ fn main() {
         match urecvr.try_recv() {
             Ok(mut u) => {
                 debug!("Accepting user {}: {}", u.get_id(), u.get_name());
+                u.deliver_msg(&Msg::info(&cfg.welcome));
+                
                 let mut rename: Option<String> = None;
                 if u.get_idstr().len() == 0 {
                     rename = Some(String::from("Your name does not have enough whitespace characters."));
@@ -706,8 +708,8 @@ fn main() {
 
                 let msg = Msg::Misc{
                     what: "join".to_string(),
-                    data: vec![u.get_name().to_string(), String::new()],
-                    alt: format!("{} joins the lobby.", u.get_name()),
+                    data: vec![u.get_name().to_string(), cfg.lobby_name.clone()],
+                    alt: format!("{} joins {}.", u.get_name(), cfg.lobby_name.clone()),
                 };
                 let env = Env::new(Endpoint::Server, Endpoint::Room(0), &msg);
                 let mut lobby = room_map.get_mut(&0).unwrap();

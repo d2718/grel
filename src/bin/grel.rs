@@ -3,13 +3,11 @@ grel.rs
 
 The `grel` terminal client.
 
-Updated to use `crossterm` instead of `termion`.
-
-updated 2021-01-08
+updated 2021-01-11
 */
 
 use lazy_static::lazy_static;
-use log::{error, debug, trace};
+use log::{error, debug};
 use std::io::stdout;
 use std::net::TcpStream;
 use std::time::{Instant};
@@ -580,6 +578,10 @@ fn write_mode_line(scrn: &mut Screen, gv: &Globals) {
 
 fn main() {
     let cfg: ClientConfig = configure();
+    #[cfg(debug)]
+    let the_log_level = simplelog::LevelFilter::Trace;
+    #[cfg(release)]
+    let the_log_level = simplelog::LevelFilter::None;
     
     simplelog::WriteLogger::init(simplelog::LevelFilter::Trace,
                                  simplelog::Config::default(),

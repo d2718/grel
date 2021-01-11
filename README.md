@@ -135,6 +135,8 @@ blackout_to_ping_ms  = 10000
 blackout_to_kick_ms  = 20000
 max_user_name_length = 24
 max_room_name_length = 32
+lobby_name = 'Lobby'
+welcome = "Welcome to a grel server.'
 log_file = 'greld.log'
 log_level = 1
 ```

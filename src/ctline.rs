@@ -14,7 +14,7 @@ updated 2021-01-08
 */
 
 use lazy_static::lazy_static;
-use log::{ debug, trace };
+use log::trace;
 
 use crossterm::{ ExecutableCommand, style };
 
