@@ -126,6 +126,27 @@ impl ServerConfig {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct Colors {
+    pub dim_foreground: Option<u8>,
+    pub dim_background: Option<u8>,
+    pub highlight_foreground: Option<u8>,
+    pub highlight_background: Option<u8>,
+    pub underline_as_bold: Option<bool>,
+}
+
+impl std::default::Default for Colors {
+    fn default() -> Self {
+        Self {
+            dim_foreground: None,
+            dim_background: None,
+            highlight_foreground: None,
+            highlight_background: None,
+            underline_as_bold: None,
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ClientConfigFile {
     address:        Option<String>,
@@ -137,6 +158,7 @@ struct ClientConfigFile {
     cmd_char:       Option<char>,
     max_scrollback: Option<usize>,
     min_scrollback: Option<usize>,
+    colors: Option<Colors>,
 }
 
 impl std::default::Default for ClientConfigFile {
@@ -151,6 +173,7 @@ impl std::default::Default for ClientConfigFile {
             cmd_char:       None,
             max_scrollback: None,
             min_scrollback: None,
+            colors:         None,
         }
     }
 }
@@ -169,6 +192,7 @@ pub struct ClientConfig {
     pub cmd_char:       char,
     pub max_scrollback: usize,
     pub min_scrollback: usize,
+    pub colors:         Option<Colors>,
 }
 
 impl ClientConfig {
@@ -211,6 +235,7 @@ impl ClientConfig {
             cmd_char:       cmd_char,
             max_scrollback: max_scroll,
             min_scrollback: min_scroll,
+            colors:       f.colors,
         };
         
         return Ok(cc);
@@ -227,6 +252,7 @@ impl ClientConfig {
             cmd_char:       Some(CMD_CHAR),
             max_scrollback: Some(MAX_SCROLLBACK),
             min_scrollback: Some(MIN_SCROLLBACK),
+            colors:         Some(Colors::default()),
         };
         
         if let Err(e) = confy::store("grel", cfg) {

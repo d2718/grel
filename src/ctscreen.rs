@@ -51,14 +51,6 @@ lazy_static!{
                    Some(&[style::Attribute::Reset]));
 }
 
-struct Bits {
-    stat_begin:       String,
-    stat_begin_chars: usize,
-    stat_end:         String,
-    stat_end_chars:   usize,
-    full_hline:       String,
-}
-
 /** This struct holds the different styles used for text shown by the client.
 This helps maintain a theme, instead of just setting whatever colors and
 attributes wherever.
@@ -69,6 +61,43 @@ pub struct Styles {
     pub bold:      Style,
     pub high:      Style,
     pub high_bold: Style,
+}
+
+struct Bits {
+    stat_begin:       String,
+    stat_begin_chars: usize,
+    stat_end:         String,
+    stat_end_chars:   usize,
+    full_hline:       String,
+}
+
+impl Bits {
+    fn new(sty: &Styles, width: u16) -> Bits {
+        let mut start = Line::new();
+        let mut end   = Line::new();
+        start.pushf(VBARSTR.as_str(), &sty.dim);
+        start.push(" ");
+        end.push(" ");
+        end.pushf(VBARSTR.as_str(), &sty.dim);
+        
+        let mut hline = Line::new();
+        {
+            let mut s = String::with_capacity(width as usize);
+            for _ in 0..width { s.push(HBAR); }
+            hline.pushf(&s, &sty.dim);
+        }
+        
+        let start_len = start.len();
+        let end_len = end.len();
+        
+        Bits {
+            stat_begin: start.first_n_chars(start_len).to_string(),
+            stat_end:   end.first_n_chars(end_len).to_string(),
+            stat_begin_chars: start_len,
+            stat_end_chars:   end_len,
+            full_hline: hline.first_n_chars((width+1) as usize).to_string(),
+        }
+    }
 }
 
 impl std::default::Default for Styles {
@@ -114,31 +143,8 @@ impl Screen {
             .queue(terminal::DisableLineWrap)?;
         term.flush()?;
         
-        let new_bits = {
-            let mut start = Line::new();
-            let mut end = Line::new();
-            start.pushf(VBARSTR.as_str(), &DEFAULT_DIM);
-            start.push(" ");
-            end.push(" ");
-            end.pushf(VBARSTR.as_str(), &DEFAULT_DIM);
-            let mut hline = Line::new();
-            {
-                let mut s = String::with_capacity(x as usize);
-                for _ in 0..x { s.push(HBAR); }
-                hline.pushf(&s, &DEFAULT_DIM);
-            }
-            
-            let start_len = start.len();
-            let end_len = end.len();
-            
-            Bits {
-                stat_begin: start.first_n_chars(start_len).to_string(),
-                stat_begin_chars: start_len,
-                stat_end: end.first_n_chars(end_len).to_string(),
-                stat_end_chars: end_len,
-                full_hline: hline.first_n_chars((x+1) as usize).to_string(),
-            }
-        };
+        let stylez = Styles::default();
+        let bitz   = Bits::new(&stylez, x);
         
         Ok(Screen {
             lines: Vec::new(), input: Vec::new(), roster: Vec::new(),
@@ -149,8 +155,8 @@ impl Screen {
             roster_dirty: true, stat_dirty: true,
             lines_scroll: 0, roster_scroll: 0,
             last_x_size: x, last_y_size: y,
-            styles: Styles::default(),
-            bits: new_bits,
+            styles: stylez,
+            bits: bitz,
         })
     }
     
@@ -159,6 +165,51 @@ impl Screen {
     `ctline::Line::pushf()`.
     */
     pub fn styles(&self) -> &Styles { &(self.styles) }
+    
+    /** Set the color scheme for the terminal. `u8`s are ANSI color numbers;
+    setting `underline` true specifies using underlining in place of bold
+    text.
+    */
+    pub fn set_styles(
+        &mut self,
+        dim_fg:  Option<u8>,
+        dim_bg:  Option<u8>,
+        high_fg: Option<u8>,
+        high_bg: Option<u8>,
+        underline: bool,
+    ) {
+        let dfg = match dim_fg {
+            None    => None,
+            Some(n) => Some(style::Color::AnsiValue(n)),
+        };
+        let dbg = match dim_bg {
+            None    => None,
+            Some(n) => Some(style::Color::AnsiValue(n)),
+        };
+        let hfg = match high_fg {
+            None    => None,
+            Some(n) => Some(style::Color::AnsiValue(n)),
+        };
+        let hbg = match high_bg {
+            None    => None,
+            Some(n) => Some(style::Color::AnsiValue(n)),
+        };
+        let attr = match underline {
+            true  => style::Attribute::Underlined,
+            false => style::Attribute::Bold,
+        };
+        
+        let new_styles = Styles {
+            dim:        Style::new(dfg, dbg, None),
+            dim_bold:   Style::new(dfg, dbg, Some(&[attr])),
+            bold:       Style::new(None, None, Some(&[attr])),
+            high:       Style::new(hfg, hbg, None),
+            high_bold:  Style::new(hfg, hbg, Some(&[attr])),
+        };
+        
+        self.styles = new_styles;
+        self.bits = Bits::new(&self.styles, self.last_x_size);
+    }
     
     /** Return the height of the main scrollback window. */
     pub fn get_main_height(&self) -> u16 { self.last_y_size - 2 }
