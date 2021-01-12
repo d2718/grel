@@ -629,6 +629,15 @@ fn main() {
                 std::process::exit(1);
             },
         };
+        if let Some(cols) = cfg.colors {
+            let uline = cols.underline_as_bold.unwrap_or(false);
+            scrn.set_styles(
+                cols.dim_foreground,
+                cols.dim_background,
+                cols.highlight_foreground,
+                cols.highlight_background,
+                uline);
+        }
         
         let mut addr_line = Line::new();
         addr_line.pushf(&gv.server_addr, &scrn.styles().high);
