@@ -22,6 +22,9 @@ pub struct Room {
     idstr: String,
     users: Vec<u64>,
     op: u64,
+    pub closed: bool,
+    bans: Vec<u64>,
+    invites: Vec<u64>,
     inbox: Vec<Env>,
 }
 
@@ -31,8 +34,11 @@ impl Room {
             idn: id,
             idstr: ascollapse(&new_name),
             name: new_name,
-            users: vec![],
+            users: Vec::new(),
             op: creator_id,
+            closed: false,
+            bans: Vec::new(),
+            invites: Vec::new(),
             inbox: Vec::new(),
         }
     }
@@ -73,10 +79,23 @@ impl Room {
     pub fn join(&mut self, uid: u64) { self.users.push(uid); }
     pub fn leave(&mut self, uid: u64) { self.users.retain(|n| *n != uid); }
     
+    pub fn ban(&mut self, uid: u64) {
+        self.invites.retain(|n| *n != uid);
+        self.bans.push(uid);
+    }
+    
+    pub fn invite(&mut self, uid: u64) {
+        self.bans.retain(|n| *n != uid);
+        self.invites.push(uid);
+    }
+    
     pub fn set_op(&mut self, uid: u64) { self.op = uid; }
     pub fn get_op(&self) -> u64 { self.op }
     
     pub fn get_users(&self) -> &[u64] { &(self.users) }
+    
+    pub fn is_banned(&self, uid: &u64)  -> bool { self.bans.contains(uid) }
+    pub fn is_invited(&self, uid: &u64) -> bool { self.invites.contains(uid) }
 }
 
 #[cfg(debug)]

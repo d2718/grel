@@ -10,6 +10,15 @@ this supersedes the `grel::protocol` lib.
 use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Op {
+    Open,
+    Close,
+    Kick(String),
+    Invite(String),
+    Give(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Msg {
     
     // Bi-directional messages
@@ -68,6 +77,8 @@ pub enum Msg {
     
     /** A request to unblock the given user. */
     Unblock(String),
+    
+    Op(Op),
     
     // Server-to-client messages.
     
