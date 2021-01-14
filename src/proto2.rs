@@ -4,20 +4,50 @@ proto2.rs
 A newer, simpler, more easily-extensible `grel` protocol. As of 2020-12-29,
 this supersedes the `grel::protocol` lib.
 
-2020-12-29
+2020-101-14
 */
 
 use serde::{Serialize, Deserialize};
 
+/** The `Op` enum represents one of the `Room` operator subcommands. It is
+used in the `Msg::Op(...)` variant of the `Msg` enum.
+*/
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Op {
+    
+    /** Open the current Room, allowing in the general public. */
     Open,
+    
+    /** Close the current Room to anyone who hasn't been specifically
+    `Invite`d. */
     Close,
+    
+    /** Ban the user with the supplied user name from the Room (even if
+    it's `Open`), removing him if he's currently in it. */
     Kick(String),
+    
+    /** Allow the user to enter the current room, even if it's `Close`d.
+    Also sends an invitation message to the user. */
     Invite(String),
+    
+    /** Transfer operatorship to another user. (The user must be in the
+    current room to receive the mantle of operatorship.) */
     Give(String),
 }
 
+/** The `Msg` enum is the structure that gets serialized to JSON and passed
+along the TCP connections between the server and the various clients.
+
+The first four variants, `Text`, `Ping`, `Priv` and `Logout` are
+bi-directional, being used to send similar information both from client
+to server and server to client.
+
+The next six, `Name`, `Join`, `Query`, `Block`, `Unblock`, and `Op` are
+for sending commands or requests from the client to the server.
+
+The final three, `Info`, `Err`, and `Misc` are used to send information
+from the server back to the client.
+*/
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Msg {
     
@@ -78,6 +108,7 @@ pub enum Msg {
     /** A request to unblock the given user. */
     Unblock(String),
     
+    /** One of the Room operator subcommands. See the `proto2::Op` enum. */
     Op(Op),
     
     // Server-to-client messages.
@@ -93,8 +124,13 @@ pub enum Msg {
     Err(String),
     
     /**
+    The `Misc` variant represents information that the client may want to
+    display in a structured manner (and not just as an unadorned line of
+    text). For any given "type" of `Misc` message, the client is free to
+    either implement its own form of displaying the information, or to
+    just use the contents of the provided `.alt` field.
     
-    Current Misc variants:
+    Current Misc variants (with example field values):
     
     ``` ignore
     // in response to a Query { what: "roster". ... }
@@ -142,7 +178,7 @@ pub enum Msg {
         alt: "Matching names: \"user1\", \"user2\", ...".to_string(),
     };
     
-    // echos a private message back to the sender
+    // echoes a private message back to the sender
     Misc {
         what: "priv_echo".to_string(),
         data: vec!["recipient".to_string(), "text of message".to_string()],
@@ -158,8 +194,10 @@ pub enum Msg {
     },
 }
 
+/** Some of these are convenience functions for instantiating certain
+variants.
+*/
 impl Msg {
-    /// Convenience functions for instantiating certain types.
     pub fn logout(msg: &str) -> Msg { Msg::Logout(String::from(msg)) }
     pub fn info(msg: &str)   -> Msg { Msg::Info(String::from(msg)) }
     pub fn err(msg: &str)    -> Msg { Msg::Err(String::from(msg)) }
@@ -268,6 +306,12 @@ mod test {
         
         println!("Msg::Unblock variant");
         let m = Msg::Unblock(String::from("Misunderstood User"));
+        test_serde(&m);
+        
+        println!("A couple of Msg::Op variants");
+        let m = Msg::Op(Op::Close);
+        test_serde(&m);
+        let m = Msg::Op(Op::Kick("FpS DoUgG".to_string()));
         test_serde(&m);
         
         println!("Msg::Info variant");

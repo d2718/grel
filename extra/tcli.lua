@@ -6,7 +6,7 @@ grel testing client in lua
 
 This is a sort of bare minimum ncurses client that works.
 
-2021-01-01
+2021-01-11
 --]]
 
 local DEBUG = false
@@ -31,7 +31,7 @@ local ROSTER_WIDTH = 24
 local SPACE = string.byte(' ')
 local NEWLINE = 13
 local ROSTER_REQUEST = { ['Query'] = { ['what'] = 'roster', ['arg'] = '_', }, }
-
+local OP_ERR = '# The recognized OP subcommands are OPEN, CLOSE, KICK, INVITE, and GIVE.'
 
 local uname = nil
 
@@ -60,6 +60,10 @@ local function tokenize(s)
         table.insert(t, chunk)
     end
     return t
+end
+
+local function capitalize(s)
+    return s:sub(1,1):upper() .. s:sub(2)
 end
 
 local sock = nil
@@ -385,6 +389,29 @@ local function handle_user_input(line, screen)
             t = { ['Query'] = { ['what'] = 'who', arg = rest, },  }
         elseif cmd == ';rooms' then
             t = { ['Query'] = { ['what'] = 'rooms', arg = rest, }, }
+        elseif cmd == ';block' then
+            t = { ['Block'] = rest, }
+        elseif cmd == ';unblock' then
+            t = { ['Unblock'] = rest, }
+        elseif cmd ==';op' then
+            if not rest then rest = '' end
+            local tokens = tokenize(rest)
+            if #tokens == 0 then
+                add_line(OP_ERR)
+                paint_lines(screen)
+            else
+                local subcmd = table.remove(tokens, 1)
+                subcmd = subcmd:lower()
+                local arg = table.concat(tokens, ' ')
+                if subcmd == 'open' or subcmd == 'close' then
+                    t = { ['Op'] = capitalize(subcmd), }
+                elseif subcmd == 'kick' or subcmd == 'invite' or subcmd == 'give' then
+                    t = { ['Op'] = { [capitalize(subcmd)] = arg, }, }
+                else
+                    add_line(OP_ERR)
+                    paint_lines(screen)
+                end
+            end
         else
             add_line(string.format('# Error: Unrecognized command: %s', cmd))
             paint_lines(screen)
