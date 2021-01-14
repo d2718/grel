@@ -18,7 +18,7 @@ use std::time::{Instant};
 
 use crossterm::{event, event::Event, event::KeyCode };
 
-use grel::proto2::Msg;
+use grel::proto2::{Msg, Op};
 use grel::sock::Sock;
 use grel::config::ClientConfig;
 use grel::ctline::Line;
@@ -37,6 +37,7 @@ lazy_static!{
 
 const SPACE:    char = ' ';
 const RETURN:   char = '\n';
+const OP_ERROR: &str = "# The recognized OP subcommands are OPEN, CLOSE, KICK, INVITE, and GIVE.";
 
 /** Represents the vaguely vi-like mode the client is in. */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,6 +259,42 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                     if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
                     let b = Msg::Unblock(arg).bytes();
                     gv.socket.enqueue(&b);
+                },
+                
+                "op" => {
+                    if cmd_toks.len() < 3 {
+                        let mut sl = Line::new();
+                        sl.pushf(OP_ERROR, &scrn.styles().dim);
+                        scrn.push_line(sl);
+                    } else {
+                        let subcmd = cmd_toks[2].to_lowercase();
+                        let mut msg: Option<Msg> = None;
+                        match subcmd.as_str() {
+                            "open" => { msg = Some(Msg::Op(Op::Open)); },
+                            "close" => { msg = Some(Msg::Op(Op::Close)); },
+                            "ban" | "kick" => {
+                                if cmd_toks.len() > 4 { for s in &cmd_toks[4..] { arg.push_str(s); } }
+                                msg = Some(Msg::Op(Op::Kick(arg)));
+                            },
+                            "invite" => {
+                                if cmd_toks.len() > 4 { for s in &cmd_toks[4..] { arg.push_str(s); } }
+                                msg = Some(Msg::Op(Op::Invite(arg)));
+                            },
+                            "give" => {
+                                if cmd_toks.len() > 4 { for s in &cmd_toks[4..] { arg.push_str(s); } }
+                                msg = Some(Msg::Op(Op::Give(arg)));
+                            },
+                            _ => {
+                                let mut sl = Line::new();
+                                sl.pushf(OP_ERROR, &scrn.styles().dim);
+                                scrn.push_line(sl);
+                            }
+                        }
+                        if let Some(m) = msg {
+                            let b = m.bytes();
+                            gv.socket.enqueue(&b);
+                        }
+                    }
                 },
                 
                 x @ _ => {

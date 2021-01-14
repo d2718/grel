@@ -153,6 +153,26 @@ example,
 
   * `;unblock jerkuser` Will unblock same, if blocked.
 
+In addition if you are the Room operator, you have several more commands
+available:
+
+  * `;op close` will "close" the room, preventing anyone who hasn't been
+    explicitly `invite`d (see below) from entering.
+
+  * `;op open` will "open" a closed room, again allowing the general public.
+  
+  * `;op invite somebody` will send an invitation message to user `somebody`,
+    as well as permitting them to join an otherwise "closed" room.
+
+  * `;op kick somebody`
+  * `;op ban somebody` &mdash; Both of these commands function identically,
+    removing `somebody` from the room (if present) and preventing him or
+    her from entering in the future. This ban can be lifted by an explicit
+    `invite`.
+
+  * `;op give somebody` will transfer the mantleship of operator to user
+    `somebody`.
+
 ### Server Instructions
 
 The server configuration on my machine is at `~/.config/greld/greld.toml`;
@@ -198,9 +218,9 @@ and you may want to redirect `stdout` to a specific file.
     IP-specific. I'm not really sure how to implement this yet without
     adding more complexity than I'd like.)
 
-  * Room ("channel" in the classic IRC sense) operators should be able to
+  * ~~Room ("channel" in the classic IRC sense) operators should be able to
     exercise certain regulatory influence over their Rooms, like muting
-    or ejecting specific users.
+    or ejecting specific users.~~ done 2021-01-13, but there's no muting.
 
   * ~~Users should be able to query the server for a full list/pattern-matching
     list of Room names.~~ done 2021-01-10
@@ -232,7 +252,8 @@ and you may want to redirect `stdout` to a specific file.
     scrolling the various panes and resizing the roster window. (Some of this
     is done; some isn't.)
     
-  * The configuration of the client should involve user-customizable colors.
+  * ~~The configuration of the client should involve user-customizable
+    colors.~~ done 2021-01-12
 
 I am happy to entertain feature requests, but simplicity is a goal.
 

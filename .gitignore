@@ -5,3 +5,6 @@
 *.log
 */*.log
 *.run
+
+# server pidfile
+d.pid
