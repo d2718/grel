@@ -121,6 +121,7 @@ pub struct Screen {
     stat_ul: Line,
     stat_ur: Line,
     stat_ll: Line,
+    #[allow(dead_code)]
     stat_lr: Line,
     lines_dirty: bool,
     input_dirty: bool,

@@ -3,7 +3,7 @@ greld.rs
 
 The `grel` daemon (server) process.
 
-updated 2021-01-11
+updated 2021-01-16
 */
 
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use std::net::TcpListener;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Instant, Duration};
-use log::{debug, warn};
+use log::{debug, warn, trace};
 use simplelog::WriteLogger;
 
 use grel::proto2::*;
@@ -25,16 +25,16 @@ use grel::config::ServerConfig;
 static BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
 static BYTES_PER_TICK: usize = 6;
 
-enum Action {
-    Move { who: u64, from: u64, to: u64,},
-    Rename { who: u64, new: String },
-    Logout { who: u64, to_who: String, to_room: String },
-    Address { who: u64 },
-    Private { from: u64, to: u64, text: String },
-    Block { blocker: u64, blockee: u64},
-    Unblock { blocker: u64, blockee: u64},
-    Kick { kicker: u64, kicked: u64 },
-    Invite { from: u64, to: u64 },
+/* The Context is instantiated in process_room() and passed to each of
+the functions that handles receiving messages from clients.
+*/
+struct Context<'a>{
+    rid: u64,
+    uid: u64,
+    umap: &'a mut HashMap<u64, User>,
+    ustr: &'a mut HashMap<String, u64>,
+    rmap: &'a mut HashMap<u64, Room>,
+    rstr: &'a mut HashMap<String, u64>,
 }
 
 fn match_string<T>(s: &str, hash: &HashMap<String, T>) -> Vec<String> {
@@ -75,6 +75,7 @@ fn initial_negotiation(u: &mut User) -> Result<(), String> {
 }
 
 fn listen(addr: String, tx: mpsc::Sender<User>) {
+    /* Lowest possible uid is 100 */
     let mut new_user_id: u64 = 100;
     let listener = TcpListener::bind(&addr).unwrap();
     for res in listener.incoming() {
@@ -113,6 +114,830 @@ fn first_free_id<T: Sized>(map: &HashMap<u64, T>) -> u64 {
     return n;
 }
 
+/*
+
+The next several functions are called during `process_room(...)` in response
+to the various types of `proto2::Msg` pulled out of a given user's `sock`.
+
+*/
+
+/// In response to Msg::Text{ _, lines }
+
+fn do_text(ctxt: &mut Context, lines: Vec<String>)
+-> Result<Vec<Env>, String> {
+    let u = match ctxt.umap.get(&ctxt.uid) {
+        None => { return Err(format!("do_text( r {}, u {}): no User {}", ctxt.rid, ctxt.uid, ctxt.uid)); },
+        Some(x) => x,
+    };
+    
+    let msg = Msg::Text {
+        who: u.get_name().to_string() ,
+        lines: lines,
+    };
+    let env = Env::new(
+        Endpoint::User(ctxt.uid),
+        Endpoint::Room(ctxt.rid),
+        &msg);
+        
+    return Ok(vec![env]);
+}
+
+/// In response to Msg::Priv { who, text }
+
+fn do_priv(ctxt: &mut Context, who: String, text: String)
+-> Result<Vec<Env>, String> {
+    let u = match ctxt.umap.get(&ctxt.uid) {
+        None => { return Err(format!("do_text( r {}, u {}): no User {}", ctxt.rid, ctxt.uid, ctxt.uid)); },
+        Some(x) => x,
+    };
+    
+    let to_tok = ascollapse(&who);
+    if to_tok.len() == 0 {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::User(ctxt.uid),
+            &Msg::err("The recipient name must have at least one non-whitespace character."));
+        return Ok(vec![env]);
+    }
+    
+    let tgt_uid = match ctxt.ustr.get(&to_tok) {
+        None => {
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &Msg::Err(format!("There is no user whose name matches \"{}\".", &to_tok)));
+            return Ok(vec![env]);
+        },
+        Some(n) => *n,
+    };
+    let tgt_u = match ctxt.umap.get(&tgt_uid) {
+        None => { return Err(format!("do_priv(r {}, u {}): no target User {}", ctxt.rid, ctxt.uid, tgt_uid)); },
+        Some(ou) => ou,
+    };
+    
+    let echo_env = Env::new(
+        Endpoint::Server,
+        Endpoint::User(ctxt.uid),
+        &Msg::Misc {
+            what: "priv_echo".to_string(),
+            data: vec![tgt_u.get_name().to_string(), text.clone()],
+            alt: format!("$ You @ {}: {}", tgt_u.get_name(), &text),
+        });
+    let to_env = Env::new(
+        Endpoint::User(ctxt.uid),
+        Endpoint::User(tgt_uid),
+        &Msg::Priv {
+            who: u.get_name().to_string(),
+            text: text,
+        });
+    
+    return Ok(vec![echo_env, to_env]);
+}
+
+/// In response to Msg::Name(new_candidate)
+
+fn do_name(ctxt: &mut Context, cfg: &ServerConfig, new_candidate: String)
+-> Result<Vec<Env>, String> {
+    let new_str = ascollapse(&new_candidate);
+    if new_str.len() == 0 {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::User(ctxt.uid),
+            &Msg::err("Your name must have more whitespace characters."));
+        return Ok(vec![env]);
+    } else if new_candidate.len() > cfg.max_user_name_length {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::User(ctxt.uid),
+            &Msg::Err(format!("Your name cannot be longer than {} characters.",
+                              &cfg.max_user_name_length)));
+        return Ok(vec![env]);
+    }
+    
+    if let Some(ouid) = ctxt.ustr.get(&new_str) {
+        let ou = match ctxt.umap.get(ouid) {
+            None => { return Err(format!("do_name(r {}, u {}): no other User {}", ctxt.rid, ctxt.uid, ouid)); },
+            Some(u) => u,
+        };
+        if *ouid != ctxt.uid {
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &Msg::Err(format!("There is already a user named \"{}\".",
+                                  ou.get_name())));
+            return Ok(vec![env]);
+        }
+    }
+    
+    if let Some(mu) = ctxt.umap.get_mut(&ctxt.uid) {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::Room(ctxt.rid),
+            &Msg::Misc {
+                what: "name".to_string(),
+                data: vec![mu.get_name().to_string(), new_candidate.clone()],
+                alt: format!("{} is now known as {}.", mu.get_name(), &new_candidate),
+            });
+        let _ = ctxt.ustr.remove(mu.get_idstr());
+        mu.set_name(&new_candidate);
+        ctxt.ustr.insert(mu.get_idstr().to_string(), ctxt.uid);
+        return Ok(vec![env]);
+    } else {
+        return Err(format!("do_name(r {}, u {}): no User {}", ctxt.rid, ctxt.uid, ctxt.uid));
+    }
+}
+
+/// In response to Msg::Join(room_name)
+
+fn do_join(ctxt: &mut Context, cfg: &ServerConfig, room_name: String)
+-> Result<Vec<Env>, String> {
+    let collapsed = ascollapse(&room_name);
+    if collapsed.len() == 0 {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::User(ctxt.uid),
+            &Msg::err("A room name must have more non-whitespace characters."));
+        return Ok(vec![env]);
+    } else if room_name.len() > cfg.max_room_name_length {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::User(ctxt.uid),
+            &Msg::Err(format!("Room names cannot be longer than {} characters.",
+                              &cfg.max_room_name_length)));
+        return Ok(vec![env]);
+    }
+    
+    let tgt_rid = match ctxt.rstr.get(&collapsed) {
+        Some(n) => *n,
+        None => {
+            let new_id = first_free_id(&ctxt.rmap);
+            let new_room = Room::new(new_id, room_name.clone(), ctxt.uid);
+            ctxt.rstr.insert(collapsed, new_id);
+            ctxt.rmap.insert(new_id, new_room);
+            if let Some(mu) = ctxt.umap.get_mut(&ctxt.uid) {
+                let create_msg = Msg::Info(format!("You create room \"{}\".", &room_name));
+                mu.deliver_msg(&create_msg);
+            } else {
+                return Err(format!("do_join(r {}, u {}): no User {}", ctxt.rid, ctxt.uid, ctxt.uid));
+            }
+            new_id
+        },
+    };
+    
+    let u = match ctxt.umap.get(&ctxt.uid) {
+        Some(u) => u,
+        None => { return Err(format!("do_join(r {}, u {}): no User {}", ctxt.rid, ctxt.uid, ctxt.uid)); },
+    };
+    
+    {
+        let targ_r = match ctxt.rmap.get_mut(&tgt_rid) {
+            Some(r) => r,
+            None => { return Err(format!("do_join(r {}, u {}): no target Room {}", ctxt.rid, ctxt.uid, tgt_rid)); },
+        };
+        if targ_r.is_banned(&ctxt.uid) {
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &Msg::Info(format!("You are banned from \"{}\".", targ_r.get_name())));
+            return Ok(vec![env]);
+        } else if targ_r.closed && !targ_r.is_invited(&ctxt.uid) {
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &Msg::Info(format!("\"{}\" is closed.", targ_r.get_name())));
+            return Ok(vec![env]);
+        }
+        targ_r.join(ctxt.uid);
+        let join_env = Env::new(
+            Endpoint::Server,
+            Endpoint::Room(tgt_rid),
+            &Msg::Misc {
+                what: "join".to_string(),
+                data: vec![u.get_name().to_string(), targ_r.get_name().to_string()],
+                alt: format!("{} joins {}.", u.get_name(), targ_r.get_name()),
+            });
+        targ_r.enqueue(join_env);
+    }
+    
+    let cur_r = match ctxt.rmap.get_mut(&ctxt.rid) {
+        Some(r) => r,
+        None => { return Err(format!("do_join(r {}, u {}): no current Room {}", ctxt.rid, ctxt.uid, ctxt.rid)); },
+    };
+    let leave_env = Env::new(
+        Endpoint::Server,
+        Endpoint::Room(tgt_rid),
+        &Msg::Misc {
+            what: "leave".to_string(),
+            data: vec![u.get_name().to_string(), "[ moved to another room ]".to_string()],
+            alt: format!("{} moved to another room.", u.get_name()),
+        });
+    cur_r.leave(ctxt.uid);
+    return Ok(vec![leave_env]);
+}
+
+/// In response to Msg::Block(user_name)
+
+fn do_block(ctxt: &mut Context, user_name: String)
+-> Result<Vec<Env>, String> {
+    let collapsed = ascollapse(&user_name);
+    if collapsed.len() == 0 {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::User(ctxt.uid),
+            &Msg::err("That cannot be anyone's user name."));
+        return Ok(vec![env]);
+    }
+    let ouid = match ctxt.ustr.get(&collapsed) {
+        None => {
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
+            return Ok(vec![env]);
+        },
+        Some(n) => *n,
+    };
+    if ouid == ctxt.uid {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::User(ctxt.uid),
+            &Msg::err("You shouldn't block yourself."));
+        return Ok(vec![env]);
+    }
+    
+    let blocked_name = match ctxt.umap.get(&ouid) {
+        None => { return Err(format!("do_block(r {}, u {}): no target User {}", ctxt.rid, ctxt.uid, ouid)); },
+        Some(u) => u.get_name().to_string(),
+    };
+    
+    if let Some(mu) = ctxt.umap.get_mut(&ctxt.uid) {
+        let msg = match mu.block_id(ouid) {
+            true => Msg::Info(format!("You are now blocking {}.", &blocked_name)),
+            false => Msg::Err(format!("You are already blocking {}.", &blocked_name)),
+        };
+        mu.deliver_msg(&msg);
+    } else {
+        return Err(format!("do_block(r {}, u {}): no User {}", ctxt.rid, ctxt.uid, ctxt.uid));
+    }
+    
+    return Ok(vec![]);
+}
+
+/// In response to Msg::Unblock(user_name)
+
+fn do_unblock(ctxt: &mut Context, user_name: String)
+-> Result<Vec<Env>, String> {
+    let collapsed = ascollapse(&user_name);
+    if collapsed.len() == 0 {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::User(ctxt.uid),
+            &Msg::err("That cannot be anyone's user name."));
+        return Ok(vec![env]);
+    }
+    let ouid = match ctxt.ustr.get(&collapsed) {
+        None => {
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
+            return Ok(vec![env]);
+        },
+        Some(n) => *n,
+    };
+    if ouid == ctxt.uid {
+        let env = Env::new(
+            Endpoint::Server,
+            Endpoint::User(ctxt.uid),
+            &Msg::err("You couldn't block yourself; you can't unblock yourself."));
+        return Ok(vec![env]);
+    }
+    
+    let blocked_name = match ctxt.umap.get(&ouid) {
+        None => { return Err(format!("do_unblock(r {}, u {}): no target User {}", ctxt.rid, ctxt.uid, ouid)); },
+        Some(u) => u.get_name().to_string(),
+    };
+    
+    if let Some(mu) = ctxt.umap.get_mut(&ctxt.uid) {
+        let msg = match mu.unblock_id(ouid) {
+            true => Msg::Info(format!("You unblock {}.", &blocked_name)),
+            false => Msg::Err(format!("You were not blocking {}.", &blocked_name)),
+        };
+        mu.deliver_msg(&msg);
+    } else {
+        return Err(format!("do_unblock(r {}, u {}): no User {}", ctxt.rid, ctxt.uid, ctxt.uid));
+    }
+    
+    return Ok(vec![]);
+}
+
+/// In response to Msg::Logout(salutation)
+
+fn do_logout(ctxt: &mut Context, salutation: String)
+-> Result<Vec<Env>, String> {
+    let mr = match ctxt.rmap.get_mut(&ctxt.rid) {
+        None => { return Err(format!("do_logout(r {}, u {}): no Room {}", ctxt.rid, ctxt.uid, ctxt.rid)); },
+        Some(r) => r,
+    };
+    mr.leave(ctxt.uid);
+    
+    let mut mu = match ctxt.umap.remove(&ctxt.uid) {
+        None => { return Err(format!("do_logout(r {}, u {}): no User {}", ctxt.rid, ctxt.uid, ctxt.uid)); },
+        Some(u) => u,
+    };
+    let _ = ctxt.ustr.remove(mu.get_idstr());
+    mu.logout("You have logged out.");
+    
+    let env = Env::new(
+        Endpoint::Server,
+        Endpoint::Room(ctxt.rid),
+        &Msg::Misc {
+            what: "leave".to_string(),
+            alt: format!("{} leaves: {}", mu.get_name(), &salutation),
+            data: vec![mu.get_name().to_string(), salutation],
+        });
+    mr.enqueue(env);
+    
+    Ok(vec![])
+}
+
+/// In response to Msg::Query { what, arg }
+
+fn do_query(ctxt: &mut Context, what: String, arg: String)
+-> Result<Vec<Env>, String> {
+    match what.as_str() {
+        "addr" => {
+            if let Some(u) = ctxt.umap.get_mut(&ctxt.uid) {
+                let (addr_str, alt_str): (String, String) = match u.get_addr() {
+                    None => ("???".to_string(),
+                        "Your public address cannot be determined.".to_string()),
+                    Some(s) => {
+                        let astr = format!("Your public address is {}.", &s);
+                        (s, astr)
+                    },
+                };
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::Misc {
+                        what: "addr".to_string(),
+                        data: vec![addr_str],
+                        alt: alt_str,
+                    });
+                return Ok(vec![env]);
+            } else {
+                return Err(format!("do_query(r {}, u{} {:?}): no User {}",
+                                    ctxt.rid, ctxt.uid, &what, ctxt.uid));
+            }
+        },
+        
+        "roster" => {
+            let r = match ctxt.rmap.get(&ctxt.rid) {
+                None => { return Err(format!("do_query(r {}, u{} {:?}): no Room {}",
+                                             ctxt.rid, ctxt.uid, &what, ctxt.rid));
+                },
+                Some(r) => r,
+            };
+            let op_id = r.get_op();
+            let mut names_list: Vec<String> = Vec::with_capacity(r.get_users().len());
+            
+            for uid in r.get_users().iter().rev() {
+                if *uid != op_id {
+                    match ctxt.umap.get(uid) {
+                        None => { warn!("do_query(r {}, u{} {:?}): no User {}",
+                                       ctxt.rid, ctxt.uid, &what, uid);
+                        },
+                        Some(u) => { names_list.push(u.get_name().to_string()); },
+                    }
+                }
+            }
+            
+            let mut altstr: String;
+            /* The lobby will never have an operator. It's operator uid is
+            set to 0 (the lowest possible uid is 100). */
+            if op_id == 0 {
+                altstr = format!("{} roster: ", r.get_name());
+                append_comma_delimited_list(&mut altstr, &names_list);
+            } else {
+                let op_name = match ctxt.umap.get(&op_id) {
+                    None => "[ ??? ]".to_string(),
+                    Some(u) => u.get_name().to_string(),
+                };
+                altstr = format!("{} roster: {} (operator) ", r.get_name(), &op_name);
+                append_comma_delimited_list(&mut altstr, &names_list);
+                names_list.push(op_name);
+            }
+
+            let names_list = names_list.into_iter().rev().collect();
+            
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &Msg::Misc {
+                    what: "roster".to_string(),
+                    data: names_list,
+                    alt: altstr,
+                });
+            return Ok(vec![env]);
+        },
+        
+        "who" => {
+            let collapsed = ascollapse(&arg);
+            let matches = match_string(&collapsed, ctxt.ustr);
+            let env: Env;
+            if matches.len() == 0 {
+                env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
+            } else {
+                let mut altstr = String::from("Matching names: ");
+                append_comma_delimited_list(&mut altstr, &matches);
+                env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::Misc {
+                        what: "who".to_string(),
+                        data: matches,
+                        alt: altstr,
+                    });
+            }
+            return Ok(vec![env]);
+        },
+        
+        "rooms" => {
+            let collapsed = ascollapse(&arg);
+            let matches = match_string(&collapsed, ctxt.rstr);
+            let env: Env;
+            if matches.len() == 0 {
+                env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::Info(format!("No Rooms matching the pattern \"{}\".", &collapsed)));
+            } else {
+                let mut altstr = String::from("Matching Rooms: ");
+                append_comma_delimited_list(&mut altstr, &matches);
+                env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::Misc {
+                        what: "rooms".to_string(),
+                        data: matches,
+                        alt: altstr,
+                    });
+            }
+            return Ok(vec![env]);
+        },
+        
+        ukn @ _ => {
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &Msg::Err(format!("Unknown \"Query\" type: \"{}\".", ukn)));
+            return Ok(vec![env]);
+        },
+    }
+}
+
+/// In response to Msg::Op(op)
+
+fn do_op(ctxt: &mut Context, op: Op)
+-> Result<Vec<Env>, String> {
+    if let Some(r) = ctxt.rmap.get(&ctxt.rid) {
+        if r.get_op() != ctxt.uid {
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &Msg::err("You are not the operator of this Room."));
+            return Ok(vec![env]);
+        }
+    } else {
+        return Err(format!("do_op(r {}, u {}): no Room {}", ctxt.rid, ctxt.uid, ctxt.rid));
+    } 
+    
+    match op {
+        Op::Open => {
+            let cur_r = match ctxt.rmap.get_mut(&ctxt.rid) {
+                None => { return Err(format!("do_op(r {}, u {}, {:?}): no Room {}",
+                                              ctxt.rid, ctxt.uid, &op, ctxt.rid)); },
+                Some(r) => r,
+            };
+            
+            if cur_r.closed {
+                let op_u = match ctxt.umap.get(&ctxt.uid) {
+                    None => { return Err(format!("do_op(r {}, u {}, {:?}): no User {}",
+                                                 ctxt.rid, ctxt.uid, &op, ctxt.uid));
+                    },
+                    Some(u) => u,
+                };
+                cur_r.closed = false;
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::Room(ctxt.rid),
+                    &Msg::Info(format!("{} has opened {}.", op_u.get_name(), cur_r.get_name())));
+                return Ok(vec![env]);
+            } else {
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::Info(format!("{} is already open.", cur_r.get_name())));
+                return Ok(vec![env]);
+            }
+        },
+        
+        Op::Close => {
+            let cur_r = match ctxt.rmap.get_mut(&ctxt.rid) {
+                None => { return Err(format!("do_op(r {}, u {}, {:?}): no Room {}",
+                                              ctxt.rid, ctxt.uid, &op, ctxt.rid));
+                },
+                Some(r) => r,
+            };
+            
+            if cur_r.closed {
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::Info(format!("{} is already closed.", cur_r.get_name())));
+                return Ok(vec![env]);
+            } else {
+                let op_u = match ctxt.umap.get(&ctxt.uid) {
+                    None => { return Err(format!("do_op(r {}, u {}, {:?}): no User {}",
+                                                 ctxt.rid, ctxt.uid, &op, ctxt.uid));
+                    },
+                    Some(u) => u,
+                };
+                cur_r.closed = true;
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::Room(ctxt.rid),
+                    &Msg::Info(format!("{} has closed {}.", op_u.get_name(), cur_r.get_name())));
+                return Ok(vec![env]);
+            }
+        },
+        
+        Op::Give(ref new_name) => {
+            let collapsed = ascollapse(&new_name);
+            if collapsed.len() == 0 {
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::err("That cannot be anyone's user name."));
+                return Ok(vec![env]);
+            }
+            
+            let ouid = match ctxt.ustr.get(&collapsed) {
+                None => {
+                    let env = Env::new(
+                        Endpoint::Server,
+                        Endpoint::User(ctxt.uid),
+                        &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
+                    return Ok(vec![env]);
+                },
+                Some(n) => *n,
+            };
+            
+            if ouid == ctxt.uid {
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::info("You are already the operator of this room."));
+                return Ok(vec![env]);
+            }
+            
+            let cur_r = match ctxt.rmap.get_mut(&ctxt.rid) {
+                None => { return Err(format!("do_op(r {}, u {}, {:?}): no Room {}",
+                                              ctxt.rid, ctxt.uid, &op, ctxt.rid));
+                },
+                Some(r) => r,
+            };
+            
+            if let Some(new_u) = ctxt.umap.get(&ouid) {
+                if !cur_r.get_users().contains(&ouid) {
+                    let env = Env::new(
+                        Endpoint::Server,
+                        Endpoint::User(ctxt.uid),
+                        &Msg::Info(format!("{} must be in the room to transfer ownership.",
+                                           new_u.get_name())));
+                    return Ok(vec![env]);
+                }
+                cur_r.set_op(ouid);
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::Room(ctxt.rid),
+                    &Msg::Info(format!("The room operator is now {}.", new_u.get_name())));
+                return Ok(vec![env]);
+            } else {
+                return Err(format!("do_op(r {}, u {}, {:?}): no target User {}",
+                                    ctxt.rid, ctxt.uid, &op, ouid));
+            }
+        },
+
+        Op::Invite(ref uname) => {
+            let collapsed = ascollapse(&uname);
+            if collapsed.len() == 0 {
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::info("That cannot be anyone's user name."));
+                return Ok(vec![env]);
+            }
+            
+            let ouid = match ctxt.ustr.get(&collapsed) {
+                None => {
+                    let env = Env::new(
+                        Endpoint::Server,
+                        Endpoint::User(ctxt.uid),
+                        &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
+                    return Ok(vec![env]);
+                },
+                Some(n) => *n,
+            };
+
+            let cur_r = match ctxt.rmap.get_mut(&ctxt.rid) {
+                None => { return Err(format!("do_op(r {}, u {}, {:?}): no Room {}",
+                                              ctxt.rid, ctxt.uid, &op, ctxt.rid));
+                },
+                Some(r) => r,
+            };
+            
+            if ouid == ctxt.uid {
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::Info(format!("You are already allowed in {}.", cur_r.get_name())));
+                return Ok(vec![env]);
+            };
+            
+            let ou = match ctxt.umap.get_mut(&ouid) {
+                None => { return Err(format!("do_op(r {}, u {}, {:?}): no target User {}",
+                                              ctxt.rid, ctxt.uid, &op, ouid));
+                },
+                Some(u) => u,
+            };
+            
+            if cur_r.is_invited(&ouid) {
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::Info(format!("{} has already been invited to {}.",
+                                        ou.get_name(), cur_r.get_name())));
+                return Ok(vec![env]);
+            };
+            cur_r.invite(ouid);
+            
+            let inviter_msg: Msg;
+            let invitee_msg: Msg;
+            if cur_r.get_users().contains(&ouid) {
+                inviter_msg = Msg::Info(format!("{} may now return to {} even when closed.",
+                                                ou.get_name(), cur_r.get_name()));
+                invitee_msg = Msg::Info(format!("You have been invited to return to {} even if it closes.",
+                                                cur_r.get_name()));
+            } else {
+                inviter_msg = Msg::Info(format!("You invite {} to join {}.", ou.get_name(), cur_r.get_name()));
+                invitee_msg = Msg::Info(format!("You have been invited to join {}.", cur_r.get_name()));
+            }
+            ou.deliver_msg(&invitee_msg);
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(ctxt.uid),
+                &inviter_msg);
+            return Ok(vec![env]);
+        },
+        
+        Op::Kick(ref uname) => {
+            let collapsed = ascollapse(&uname);
+            if collapsed.len() == 0 {
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::info("That cannot be anyone's user name."));
+                return Ok(vec![env]);
+            }
+            
+            let ouid = match ctxt.ustr.get(&collapsed) {
+                None => {
+                    let env = Env::new(
+                        Endpoint::Server,
+                        Endpoint::User(ctxt.uid),
+                        &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
+                    return Ok(vec![env]);
+                },
+                Some(n) => *n,
+            };
+            
+            if ouid == ctxt.uid {
+                let env = Env::new(
+                    Endpoint::Server,
+                    Endpoint::User(ctxt.uid),
+                    &Msg::info("Bestowing the operator mantle on another and then leaving would be a more orderly transfer of power."
+                    ));
+                return Ok(vec![env]);
+            }
+            
+            let ku = match ctxt.umap.get_mut(&ouid) {
+                None => { return Err(format!("do_op(r {}, u {}, {:?}): no target User {}",
+                                             ctxt.rid, ctxt.uid, &op, ouid));
+                },
+                Some(u) => u,
+            };
+            
+            let in_room: bool;
+            let mut cur_room_str = String::new();
+            
+            {
+                let cur_r = match ctxt.rmap.get_mut(&ctxt.rid) {
+                    None => { return Err(format!("do_op(r {}, u {}, {:?}): no Room {}",
+                                                 ctxt.rid, ctxt.uid, &op, ctxt.rid));
+                    },
+                    Some(r) => r,
+                };
+            
+                if cur_r.is_banned(&ouid) {
+                    let env = Env::new(
+                        Endpoint::Server,
+                        Endpoint::User(ctxt.uid),
+                        &Msg::Info(format!("{} is already banned from {}.",
+                                           ku.get_name(), cur_r.get_name())));
+                    return Ok(vec![env]);
+                };
+            
+                cur_r.ban(ouid);
+                in_room = cur_r.get_users().contains(&ouid);
+                
+                if !in_room {
+                    /* This case is easy because we only have to message the
+                    banner about his activity.
+                    */
+                    if !cur_r.get_users().contains(&ouid) {
+                        let env = Env::new(
+                            Endpoint::Server,
+                            Endpoint::User(ctxt.uid),
+                            &Msg::Info(format!("You have banned {} from {}.", ku.get_name(), cur_r.get_name())));
+                        return Ok(vec![env]);
+                        /* If the kickee is _not_ in the room, this function
+                        returns now. All the rest of the Op::Kick match arm,
+                        even after the closing of the conditionals and
+                        reference-dropping scopes, involves the case where
+                        the kickee _is_ in the current room.
+                        */
+                    }
+                } else {
+                    /* This case is tougher because it involves
+                      * messaging the kicked user
+                      * moving the kicked user
+                      * messaging the room
+                      * messaging the Lobby that he's joined it
+                    
+                    It requires careful dancing around &mut lifetimes.
+                    */
+                    
+                    let to_kicked = Msg::Info(format!("You have been kicked from {}.", cur_r.get_name()));
+                    ku.deliver_msg(&to_kicked);                    
+                    cur_r.leave(ouid);
+            
+                    cur_room_str = format!("{} has been kicked from {}.",
+                                            ku.get_name(), cur_r.get_name());
+                }
+                
+                /* Mutable reference to ctxt.rmap contents (&mut cur_r) drops
+                here, allowing us to get a mutable reference to the lobby to
+                add the kicked user back in there.
+                 */
+            }
+            
+            // If the lobby doesn't exist, the server can go ahead and crash.
+            let lobby = ctxt.rmap.get_mut(&0).unwrap();
+            lobby.join(ouid);
+            let to_lobby = Env::new(
+                Endpoint::Server,
+                Endpoint::Room(ctxt.rid),
+                &Msg::Misc {
+                    what: "join".to_string(),
+                    data: vec![ku.get_name().to_string(), lobby.get_name().to_string()],
+                    alt: format!("{} joins {}.", ku.get_name(), lobby.get_name()),
+                });
+            lobby.enqueue(to_lobby);
+            
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::Room(ctxt.rid),
+                &Msg::Info(cur_room_str));
+            
+            return Ok(vec![env]);
+        },
+    }
+}
+
+/*
+Each time through `greld`'s main loop, this is called on each of the `Room`s.
+It iterates through each User in the room, reacting to any `Msg`s it
+receives from them.
+
+It also performs some various housekeeping, like displaying any messages
+`.enqueue()`d by calls to this function on _other_ `Room`s, and bestowing
+the op mantle on another user if the op leaves.
+*/
+
 fn process_room(
     rid: u64,
     current_time: Instant,
@@ -122,22 +947,33 @@ fn process_room(
     rstr_map: &mut HashMap<String, u64>,
     cfg: &ServerConfig
 ) -> Result<(), String> {
-    let mut uid_list: Vec<u64> = Vec::new();
+    let mut uid_list: Vec<u64>;
     {
         match room_map.get(&rid) {
             None  => { return Err(format!("Room {} doesn't exist.", &rid)); },
-            Some(r) => { uid_list.extend_from_slice(r.get_users()); },
+            Some(r) => {
+                uid_list = vec![0; r.get_users().len()];
+                uid_list.copy_from_slice(r.get_users());
+            },
         }
     }
     
+    let mut ctxt = Context {
+        rid: rid,
+        uid: 0,
+        umap: user_map,
+        ustr: ustr_map,
+        rmap: room_map,
+        rstr: rstr_map,
+    };
+    
     let mut envz: Vec<Env> = Vec::new();
-    let mut acts: Vec<Action> = Vec::new();
+    let mut logouts: Vec<u64> = Vec::new();
     
     for uid in &uid_list {
-        let u: &User;
         let m: Msg;
         {
-            let mu = match user_map.get_mut(uid) {
+            let mu = match ctxt.umap.get_mut(uid) {
                 None => {
                     debug!("process_room({}): user {} doesn't exist", &rid, uid);
                     continue;
@@ -150,12 +986,7 @@ fn process_room(
                     let last = mu.get_last_data_time();
                     match current_time.checked_duration_since(last) {
                         Some(x) if x > cfg.blackout_time_to_kick => {
-                            let act = Action::Logout{
-                                who: *uid,
-                                to_who: String::from("Too long since the server received data from the client."),
-                                to_room: String::from("[ disconnected by server ]"),
-                            };
-                            acts.push(act);
+                            logouts.push(*uid);
                         },
                         Some(x) if x > cfg.blackout_time_to_ping => {
                             mu.deliver_msg(&Msg::Ping);
@@ -166,658 +997,51 @@ fn process_room(
                 },
                 Some(msg) => { m = msg; }
             }
-            u = mu;
         }
         
-        match m {
-            Msg::Text { who: _, lines: l } => {
-                let newm = Msg::Text { who: u.get_name().to_string(), lines: l };
-                let env = Env::new(Endpoint::User(*uid), Endpoint::Room(rid), &newm);
-                envz.push(env);
-            },
-            
-            Msg::Priv { who, text } => {
-                let to_tok = ascollapse(&who);
-                if to_tok.len() == 0 {
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                        &Msg::err("The recipient name must have at least one non-whitespace character."));
-                    envz.push(env);
-                    continue;
-                }
-                
-                match ustr_map.get(&to_tok) {
-                    None => {
-                        let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                            &Msg::Err(format!("There is no user whose name matches \"{}\".", &to_tok)));
-                        envz.push(env);
-                    },
-                    Some(tgt_uid) => {
-                        let act = Action::Private{ from: *uid, to: *tgt_uid, text: text};
-                        acts.push(act);
-                    },
-                }
-            },
-                
-            Msg::Name(new_candidate) => {
-                let act = Action::Rename{ who: *uid, new: new_candidate };
-                acts.push(act);
-            },
-            
-            Msg::Join(room_name) => {
-                let collapsed = ascollapse(&room_name);
-                debug!("process_room({}): Msg::Join: {} ({})", &rid, &room_name, &collapsed);
-                if collapsed.len() == 0 {
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                        &Msg::err("That cannot be a room name."));
-                    envz.push(env);
-                    continue;
-                } else if room_name.len() > cfg.max_room_name_length {
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                        &Msg::Err(format!("Room names cannot be longer than {} bytes.", cfg.max_room_name_length)));
-                    envz.push(env);
-                    continue;
-                }
-                let found: bool;
-                match rstr_map.get(&collapsed) {
-                    Some(n) => {
-                        acts.push(Action::Move{ who: *uid, from: rid, to: *n });
-                        found = true;
-                    },
-                    None => { found = false; },
-                }
-                if !found {
-                    let new_id = first_free_id(room_map);
-                    let new_room = Room::new(new_id, room_name.clone(), *uid);
-                    rstr_map.insert(collapsed, new_id);
-                    room_map.insert(new_id, new_room);
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                        &Msg::Info(format!("You create room \"{}\".", &room_name)));
-                    debug!("process_room({}): User {} ({}) creates room {} ({})",
-                            &rid, u.get_id(), u.get_name(), &new_id, &room_name);
-                    envz.push(env);
-                    let act = Action::Move{ who: *uid, from: rid, to: new_id };
-                    acts.push(act);
-                }
+        ctxt.uid = *uid;
+        
+        let pres = match m {
 
+            Msg::Text { who: _, lines: l } => do_text(&mut ctxt, l),
+            Msg::Priv { who, text }        => do_priv(&mut ctxt, who, text),
+            Msg::Name(new_candidate)       => do_name(&mut ctxt, cfg, new_candidate),
+            Msg::Join(room_name)           => do_join(&mut ctxt, cfg, room_name),
+            Msg::Block(user_name)          => do_block(&mut ctxt, user_name),
+            Msg::Unblock(user_name)        => do_unblock(&mut ctxt, user_name),
+            Msg::Logout(salutation)        => do_logout(&mut ctxt, salutation),
+            Msg::Query{ what, arg }        => do_query(&mut ctxt, what, arg),
+            Msg::Op(op)                    => do_op(&mut ctxt, op),
+            _ => { /* Other patterns require no response. */ Ok(vec![]) },
+        };
+        
+        match pres {
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                trace!("{}", e);
+                #[cfg(not(debug_assertions))]
+                warn!("{}", e);
             },
-            
-            Msg::Block(user_name) => {
-                let collapsed = ascollapse(&user_name);
-                if collapsed.len() == 0 {
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                        &Msg::err("That cannot be anyone's user name."));
-                    envz.push(env);
-                    continue;
-                }
-                match ustr_map.get(&collapsed) {
-                    None => {
-                        let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                            &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-                        envz.push(env);
-                    },
-                    Some(n) => {
-                        if *n == *uid {
-                            let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::err("You shouldn't block yourself."));
-                            envz.push(env);
-                        } else {
-                            let act = Action::Block{ blocker: *uid, blockee: *n };
-                            acts.push(act);
-                        }
-                    },
-                }
-            },
-            
-            Msg::Unblock(user_name) => {
-                let collapsed = ascollapse(&user_name);
-                if collapsed.len() == 0 {
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                        &Msg::err("That cannot be anyone's user name."));
-                    envz.push(env);
-                    continue;
-                }
-                match ustr_map.get(&collapsed) {
-                    None => {
-                        let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                            &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-                        envz.push(env);
-                    },
-                    Some(n) => {
-                        let act = Action::Unblock{ blocker: *uid, blockee: *n };
-                        acts.push(act);
-                    },
-                }
-            },
-            
-            Msg::Op(op) => {
-                let cur_r = match room_map.get_mut(&rid) {
-                    None => {
-                        warn!("process_room({}): Msg::Op::?: no room {}", &rid, &rid);
-                        continue;
-                    },
-                    Some(mr) => {
-                        if mr.get_op() != *uid {
-                            let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::err("You are not the operator of this Room."));
-                            envz.push(env);
-                            continue;
-                        }
-                        mr
-                    },
-                };
-                
-                match op {
-                    Op::Open => {
-                        if cur_r.closed {
-                            cur_r.closed = false;
-                            let env = Env::new(Endpoint::Server, Endpoint::Room(rid),
-                                &Msg::Info(format!("{} has opened the room {}.",
-                                            u.get_name(), cur_r.get_name())));
-                            envz.push(env);
-                        } else {
-                            let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::info("The room is already open."));
-                            envz.push(env);
-                        }
-                    },
-                    Op::Close => {
-                        if cur_r.closed {
-                            let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::info("The room is already closed."));
-                            envz.push(env);
-                        } else {
-                            cur_r.closed = true;
-                            let env = Env::new(Endpoint::Server, Endpoint::Room(rid),
-                                &Msg::Info(format!("{} has closed the room {}.",
-                                            u.get_name(), cur_r.get_name())));
-                            envz.push(env);
-                        }
-                    },
-                    Op::Kick(uname) => {
-                        let collapsed = ascollapse(&uname);
-                        if collapsed.len() == 0 {
-                            let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::err("That cannot be anyone's user name."));
-                            envz.push(env);
-                            continue;
-                        }
-                        
-                        let ouid = match ustr_map.get(&collapsed) {
-                            None => {
-                                let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                    &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-                                envz.push(env);
-                                continue;
-                            },
-                            Some(n) => {
-                                if *n == *uid {
-                                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                        &Msg::info("Bestowing the operator mantle on another and then leaving would be a more orderly transfer of power."));
-                                    envz.push(env);
-                                    continue;
-                                }
-                                n
-                            },
-                        };
-                        
-                        let act = Action::Kick{ kicker: *uid, kicked: *ouid };
-                        acts.push(act);
-                    },
-                    Op::Invite(uname) => {
-                        let collapsed = ascollapse(&uname);
-                        if collapsed.len() == 0 {
-                            let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::err("That cannot be anyone's user name."));
-                            envz.push(env);
-                            continue;
-                        }
-                        
-                        let ouid = match ustr_map.get(&collapsed) {
-                            None => {
-                                let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                    &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-                                envz.push(env);
-                                continue;
-                            },
-                            Some(n) => {
-                                if *n == *uid {
-                                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                        &Msg::info("You are already allowed in the room."));
-                                    envz.push(env);
-                                    continue;
-                                }
-                                n
-                            },
-                        };
-                        
-                        let act = Action::Invite{ from: *uid, to: *ouid };
-                        acts.push(act);
-                    },
-                    Op::Give(uname) => {
-                        let collapsed = ascollapse(&uname);
-                        if collapsed.len() == 0 {
-                            let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::err("That cannot be anyone's user name."));
-                            envz.push(env);
-                            continue;
-                        }
-                        
-                        let ouid = match ustr_map.get(&collapsed) {
-                            None => {
-                                let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                    &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-                                envz.push(env);
-                                continue;
-                            },
-                            Some(n) => {
-                                if *n == *uid {
-                                    let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                        &Msg::info("You are already the operator of this Room."));
-                                    envz.push(env);
-                                    continue;
-                                }
-                                n
-                            },
-                        };
-                        
-                        
-                        if let Some(new_u) = user_map.get(ouid) {
-                            if !cur_r.get_users().contains(ouid) {
-                                let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                    &Msg::Info(format!("{} must be in the room in order to transfer operatorship.", new_u.get_name())));
-                                envz.push(env);
-                                continue;
-                            }
-                            let env = Env::new(Endpoint::Server, Endpoint::Room(rid),
-                                &Msg::Info(format!("The Room operator is now {}.", new_u.get_name())));
-                            envz.push(env);
-                            cur_r.set_op(*ouid);
-                        } else {
-                            warn!("process_room({}): No user {}.", &rid, ouid);
-                        }
-                    },
-                }
-            },
-            
-            Msg::Query { what: k, arg: v }=> {
-                match k.as_str() {
-                    "addr" => {
-                        let act = Action::Address{ who: *uid };
-                        acts.push(act);
-                    },
-                    "roster" => {
-                        let mut names_list: Vec<String> = Vec::with_capacity(uid_list.len());
-                        for uid2 in &uid_list {
-                            match user_map.get(uid2) {
-                                None => { warn!("process_room({}): Msg::Query( roster ): no user {}",
-                                                 &rid, uid2); },
-                                Some(u) => { names_list.push(String::from(u.get_name())); },
-                            }
-                        }
-                        match room_map.get(&rid) {
-                            None => { warn!("process_room({}): Msg::Query( roster ): room_map.get() returns None!!1", &rid); },
-                            Some(r) => {
-                                let mut altstr = format!("{} roster: ", r.get_name());
-                                append_comma_delimited_list(&mut altstr, &names_list);
-                                let msg = Msg::Misc {
-                                    what: String::from("roster"),
-                                    data: names_list,
-                                    alt: altstr,
-                                };
-                                let env = Env::new(Endpoint::Server, Endpoint::User(*uid), &msg);
-                                envz.push(env);
-                            },
-                        }
-                    },
-                    "who" => {
-                        let match_name = ascollapse(&v);
-                        let matches = match_string(&match_name, ustr_map);
-                        let env: Env;
-                        if matches.len() == 0 {
-                            env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::Info(format!("No users matching the pattern \"{}\".", &match_name)));
-                        } else {
-                            let mut altstr = String::from("Matching names: ");
-                            append_comma_delimited_list(&mut altstr, &matches);
-                            env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::Misc {
-                                    what: "who".to_string(),
-                                    data: matches,
-                                    alt: altstr,
-                                }
-                            );
-                        }
-                        envz.push(env);
-                    },
-                    "rooms" => {
-                        let match_name = ascollapse(&v);
-                        let matches = match_string(&match_name, rstr_map);
-                        let env: Env;
-                        if matches.len() == 0 {
-                            env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::Info(format!("No rooms matching the pattern \"{}\".", &match_name)));
-                        } else {
-                            let mut altstr = String::from("Matching rooms: ");
-                            append_comma_delimited_list(&mut altstr, &matches);
-                            env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                                &Msg::Misc {
-                                    what: "rooms".to_string(),
-                                    data: matches,
-                                    alt: altstr,
-                                }
-                            );
-                        }
-                        envz.push(env);
-                    },
-                    _ => {
-                        let env = Env::new(Endpoint::Server, Endpoint::User(*uid),
-                            &Msg::Err(format!("Unknonw \"Query\" type: \"{}\".", k)));
-                        envz.push(env);
-                    },
-                }
-            },
-            Msg::Logout(salutation) => {
-                let act = Action::Logout{
-                    who: *uid, 
-                    to_who: String::from("You have logged out."),
-                    to_room: salutation
-                };
-                acts.push(act);
-            },
-            _ => { /* not implemented */ },
+            Ok(mut v) => { for env in v.drain(..) { envz.push(env); } },
         }
     }
     
-    for act in &acts {
-        match act {
-            
-            Action::Move{ who: w, from: _f, to: t } => {
-                let u = match user_map.get(&w) {
-                    Some(u) => u,
-                    None => {
-                        warn!("process_room({}): Action::Move: user {} doesn't exist.", &rid, &w);
-                        continue;
-                    },
-                };
-                {
-                    let targ_r = match room_map.get_mut(&t) {
-                        Some(r) => r,
-                        None => {
-                            warn!("process_room({}): Action::Move: room {} doesn't exist.", &rid, &t);
-                            continue;
-                        },
-                    };
-                    if targ_r.is_banned(w) {
-                        let env = Env::new(Endpoint::Server, Endpoint::User(*w),
-                            &Msg::Info(format!("You are banned from \"{}\".", targ_r.get_name())));
-                        envz.push(env);
-                        continue;
-                    } else if targ_r.closed && !targ_r.is_invited(w) {
-                        let env = Env::new(Endpoint::Server, Endpoint::User(*w),
-                            &Msg::Info(format!("\"{}\" is closed.", targ_r.get_name())));
-                        envz.push(env);
-                        continue;
-                    }
-                    targ_r.join(*w);
-                    let join_msg = Msg::Misc {
-                        what: String::from("join"),
-                        data: vec![String::from(u.get_name()),
-                                   String::from(targ_r.get_name())],
-                        alt: format!("{} joins {}.", u.get_name(), targ_r.get_name()),
-                    };
-                    let join_env = Env::new(Endpoint::User(*w), Endpoint::Room(*t), &join_msg);
-                    targ_r.enqueue(join_env);
-                    debug!("process_room({}): Action::Move: target room {} user list: {:?}",
-                           &rid, targ_r.get_id(), targ_r.get_users());
-                }
-                {
-                    let cur_r = room_map.get_mut(&rid).unwrap();
-                    let leave_msg = Msg::Misc {
-                        what: String::from("leave"),
-                        data: vec![String::from(u.get_name()),
-                                   "moved to another room".to_string()],
-                        alt: format!("{} moved to another room.", u.get_name()),
-                    };
-                    let leave_env = Env::new(Endpoint::User(*w), Endpoint::Room(rid), &leave_msg);
-                    envz.push(leave_env);
-                    cur_r.leave(*w);
-                    
-                    debug!("process_room({}): Action::Move: old room {} user list: {:?}",
-                           &rid, cur_r.get_id(), cur_r.get_users());
-                }
-            },
-            
-            Action::Rename{ who: w, new: new_name } => {
-                let new_id = ascollapse(&new_name);
-                if new_id.len() == 0 {
-                    let msg = Msg::err("Your name must have more non-whitespace characters.");
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*w), &msg);
-                    envz.push(env);
-                    continue;
-                } else if new_name.len() > cfg.max_user_name_length {
-                    let msg = Msg::Err(format!("Your name cannot be longer than {} bytes.", cfg.max_user_name_length));
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*w), &msg);
-                    envz.push(env);
-                    continue;
-                }
-                if let Some(ouid) = ustr_map.get(&new_id) {
-                    let ou = match user_map.get(ouid) {
-                        None => { continue; },
-                        Some(u) => u,
-                    };
-                    if *ouid != *w {
-                        let msg = Msg::Err(format!("There is already a user named \"{}\".", ou.get_name()));
-                        let env = Env::new(Endpoint::Server, Endpoint::User(*w), &msg);
-                        envz.push(env);
-                        continue;
-                    }
-                }
-                if let Some(mu) = user_map.get_mut(&w) {
-                    let msg = Msg::Misc {
-                        what: String::from("name"),
-                        data: vec![mu.get_name().to_string(), new_name.clone()],
-                        alt: format!("{} is now known as {}.",
-                                    mu.get_name(), &new_name),
-                    };
-                    let _ = ustr_map.remove(mu.get_idstr());
-                    let env = Env::new(Endpoint::Server, Endpoint::Room(rid), &msg);
-                    envz.push(env);
-                    mu.set_name(&new_name);
-                    ustr_map.insert(mu.get_idstr().to_string(), *w);
-                } else {
-                    warn!("process_room({}): Action::Rename: User {} doesn't exist.", &rid, w);
-                }
-            },
-            
-            Action::Private{ from, to, text } => {
-                if let Some(src) = user_map.get(from) {
-                    let env = Env::new(Endpoint::User(*from), Endpoint::User(*to),
-                        &Msg::Priv{ who: src.get_name().to_string(), text: text.clone() });
-                    envz.push(env);
-                } else {
-                    warn!("process_room({}): Action::Private: User {} doesn't exist.", &rid, from);
-                }
-                if let Some(dest) = user_map.get(to) {
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*from),
-                        &Msg::Misc{
-                            what: "priv_echo".to_string(),
-                            data: vec![dest.get_name().to_string(), text.clone()],
-                            alt: format!("$ You @ {}: {}", dest.get_name().to_string(), text),
-                        });
-                    envz.push(env);
-                } else {
-                    warn!("process_room({}): Action::Private: User {} doesn't exist.", &rid, to);
-                }
-            },
-            
-            Action::Logout{ who: w, to_who: twho, to_room: salutation } => {
-                if let Some(mut mu) = user_map.remove(w) {
-                    let _ = ustr_map.remove(mu.get_idstr());
-                    mu.logout(&twho);
-                    let msg = Msg::Misc {
-                        what: "leave".to_string(),
-                        data: vec![mu.get_name().to_string(),
-                                   salutation.clone()],
-                        alt: format!("{} leaves: {}", mu.get_name(), &salutation),
-                    };
-                    let env = Env::new(Endpoint::User(*w), Endpoint::Room(rid), &msg);
-                    envz.push(env);
-                } else {
-                    warn!("process_room({}): Action::Logout: User {} doesn't exist.", &rid, &w);
-                }
-                let mr = room_map.get_mut(&rid).unwrap();
-                mr.leave(*w);
-            },
-            
-            Action::Block{ blocker, blockee } => {
-                let mut blocked_name: Option<String> = None;
-                if let Some(u) = user_map.get(blockee) {
-                    blocked_name = Some(u.get_name().to_string());
-                };
-                
-                if let Some(mu) = user_map.get_mut(blocker) {
-                    let msg: Msg;
-                    match blocked_name {
-                        None => {
-                            msg = Msg::info("There is no user with that name.");
-                        },
-                        Some(name) => {
-                            match mu.block_id(*blockee) {
-                                true => {
-                                    msg = Msg::Info(format!("You are now blocking \"{}\".", &name));
-                                },
-                                false => {
-                                    msg = Msg::Err(format!("You are already blocking \"{}\".", &name));
-                                },
-                            }
-                        }
-                    }
-                    mu.deliver_msg(&msg);
-                } else {
-                    warn!("process_room({}): Action::Block: User {} doesn't exist.", &rid, &blocker);
-                }
-            },
-            
-            Action::Unblock{ blocker, blockee } => {
-                let mut blocked_name: Option<String> = None;
-                if let Some(u) = user_map.get(blockee) {
-                    blocked_name = Some(u.get_name().to_string());
-                };
-                
-                if let Some(mu) = user_map.get_mut(blocker) {
-                    let msg: Msg;
-                    match blocked_name {
-                        None => {
-                            msg = Msg::info("There is no user with that name.");
-                        },
-                        Some(name) => {
-                            match mu.unblock_id(*blockee) {
-                                true => {
-                                    msg = Msg::Info(format!("You unblock \"{}\".", &name));
-                                },
-                                false => {
-                                    msg = Msg::Err(format!("You were not blocking \"{}\".", &name));
-                                },
-                            }
-                        }
-                    }
-                    mu.deliver_msg(&msg);
-                } else {
-                    warn!("process_room({}): Action::Unblock: User {} doesn't exist.", &rid, &blocker);
-                }
-            },
-            
-            Action::Kick{ kicker, kicked } => {
-                let mut return_to_lobby: bool = false;
-                let uname: String;
-                {
-                    let cur_r = room_map.get_mut(&rid).unwrap();
-                    if cur_r.get_users().contains(kicked) {
-                        if let Some(mu) = user_map.get_mut(kicked) {
-                            uname = mu.get_name().to_string();
-                            let msg = Msg::Info(format!("You have been kicked from \"{}\".", cur_r.get_name()));
-                            mu.deliver_msg(&msg);
-                            cur_r.leave(*kicked);
-                            let env = Env::new(Endpoint::Server, Endpoint::Room(rid),
-                                &Msg::Info(format!("{} has been kicked from \"{}\".", &uname, cur_r.get_name())));
-                            envz.push(env);
-                            return_to_lobby = true;
-                        } else {
-                            warn!("process_room({}): Action::Kick: User {} doesn't exist.", &rid, &kicked);
-                            continue;
-                        }
-                    } else {
-                        if let Some(u) = user_map.get(kicked) {
-                            uname = u.get_name().to_string();
-                        } else {
-                            warn!("process_room({}): Action::Kick: User {} doesn't exist.", &rid, &kicked);
-                            continue;
-                        }
-                        if let Some(mu) = user_map.get_mut(kicker) {
-                            let msg = Msg::Info(format!("You have banned {} from \"{}\".", &uname, cur_r.get_name()));
-                            mu.deliver_msg(&msg);
-                        } else  {
-                            warn!("process_room({}): Action::Kick: User {} doesn't exist.", &rid, &kicker);
-                        }
-                    }
-                    cur_r.ban(*kicked);
-                }
-                if return_to_lobby {
-                    if let Some(lobby) = room_map.get_mut(&0) {
-                        lobby.join(*kicked);
-                        let join_msg = Msg::Misc{
-                            what: "join".to_string(),
-                            data: vec![uname.clone(),
-                                       lobby.get_name().to_string()],
-                            alt: format!("{} joins {}.", &uname, lobby.get_name()),
-                        };
-                        let join_env = Env::new(Endpoint::Server, Endpoint::Room(0), &join_msg);
-                        lobby.enqueue(join_env);
-                    }
-                }
-            },
-            
-            Action::Invite { from, to } => {
-                if let Some(mr) = room_map.get_mut(&rid) {
-                    let uname: String;
-                    if let Some(to_u) = user_map.get_mut(to) {
-                        mr.invite(*to);
-                        uname = to_u.get_name().to_string();
-                        let msg = Msg::Info(format!("You have been invited to join \"{}\".", mr.get_name()));
-                        to_u.deliver_msg(&msg);
-                    } else {
-                        warn!("process_room({}): Action::Invite: User {} doesn't exist.", &rid, to);
-                        continue;
-                    }
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*from),
-                        &Msg::Info(format!("You invite \"{}\" to join \"{}\".", &uname, mr.get_name())));
-                    envz.push(env);
-                } else {
-                    warn!("process_room({}): Action::Invite: Room {} doesn't exist.", &rid, &rid);
-                }
-            },
-
-            Action::Address{ who: w } => {
-                if let Some(mu) = user_map.get_mut(&w) {
-                    let (addr_str, alt_str): (String, String) = match mu.get_addr() {
-                        None => ("???".to_string(),
-                            "Your public address cannot be determined.".to_string()),
-                        Some(s) => {
-                            let astr = format!("Your public address is {}.", &s);
-                            (s, astr)
-                        },
-                    };
-                    let msg = Msg::Misc {
-                        what: String::from("addr"),
-                        data: vec![addr_str],
-                        alt: alt_str,
-                    };
-                    let env = Env::new(Endpoint::Server, Endpoint::User(*w), &msg);
-                    envz.push(env);
-                } else {
-                    warn!("process_room({}): Action::Address: User {} doesn't exist.", &rid, &w);
-                }
-            },
+    for uid in logouts.drain(..) {
+        if let Some(mu) = ctxt.umap.get_mut(&uid) {
+            let msg = Msg::logout("Too long since the server received data from the client.");
+            mu.deliver_msg(&msg);
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::Room(ctxt.rid),
+                &Msg::Misc {
+                    what: "leave".to_string(),
+                    data: vec![mu.get_name().to_string(),
+                               "[ disconnected by server ]".to_string()],
+                    alt: format!("{} has been disconnected from the server.", mu.get_name()),
+                });
+            envz.push(env);
+        } else {
+            warn!("process_room({} ...): logouts.drain(): no User {}", ctxt.rid, uid);
         }
     }
     
@@ -825,12 +1049,12 @@ fn process_room(
     // (But obviously not for the lobby.)
     
     if rid != 0 {
-        let mr = room_map.get_mut(&rid).unwrap();
+        let mr = ctxt.rmap.get_mut(&rid).unwrap();
         let op_id = mr.get_op();
         let op_still_here = mr.get_users().contains(&op_id);
         if !op_still_here {
             if let Some(pnid) = mr.get_users().get(0) {
-                if let Some(u) = user_map.get(pnid) {
+                if let Some(u) = ctxt.umap.get(pnid) {
                     let nid = *pnid;
                     mr.set_op(nid);
                     let env = Env::new(Endpoint::Server, Endpoint::Room(rid),
@@ -842,10 +1066,10 @@ fn process_room(
     }
     
     {
-        let r = room_map.get_mut(&rid).unwrap();
-        r.deliver_inbox(user_map);
+        let r = ctxt.rmap.get_mut(&rid).unwrap();
+        r.deliver_inbox(ctxt.umap);
         for env in &envz {
-            r.deliver(env, user_map);
+            r.deliver(env, ctxt.umap);
         }
         uid_list.clear();
         uid_list.extend_from_slice(r.get_users());
@@ -859,6 +1083,9 @@ fn process_room(
     return Ok(());
 }
 
+/** When a user joins with a name that `ascollapse()`s to a user who is
+already joined, this generates them a generic (but unique) name.
+*/
 fn gen_name(init_count: u64, map: &HashMap<String, u64>) -> String {
     let mut n = init_count;
     loop {
@@ -898,6 +1125,9 @@ fn main() {
     let mut room_map: HashMap<u64, Room> = HashMap::new();
     let mut rstr_map: HashMap<String, u64> = HashMap::new();
     
+    /* We set the lobby's uid to be 0, because no user will have a
+       uid less than 100.
+    */
     let mut lobby: Room = Room::new(0, cfg.lobby_name.clone(), 0);
     lobby.leave(0);
     room_map.insert(0, lobby);
@@ -974,7 +1204,7 @@ fn main() {
                     alt: format!("{} joins {}.", u.get_name(), cfg.lobby_name.clone()),
                 };
                 let env = Env::new(Endpoint::Server, Endpoint::Room(0), &msg);
-                let mut lobby = room_map.get_mut(&0).unwrap();
+                let lobby = room_map.get_mut(&0).unwrap();
                 lobby.join(u.get_id());
                 lobby.enqueue(env);
                 ustr_map.insert(u.get_idstr().to_string(), u.get_id());
