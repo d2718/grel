@@ -179,6 +179,8 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
     if let Some(c) = ipt.first() {
         if *c == gv.cmd {
             
+            if ipt.len() == 1 { return; }
+            
             /* Collect the ipt vector as a string, discarding the cmd_char and
             translating newlines to spaces. */
             let cmd_line: String = ipt[1..].into_iter()
