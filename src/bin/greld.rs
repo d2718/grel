@@ -844,7 +844,7 @@ fn do_op(ctxt: &mut Context, op: Op)
             };
             
             let in_room: bool;
-            let mut cur_room_str = String::new();
+            let mut cur_room_name = String::new();
             
             {
                 let cur_r = match ctxt.rmap.get_mut(&ctxt.rid) {
@@ -897,8 +897,7 @@ fn do_op(ctxt: &mut Context, op: Op)
                     ku.deliver_msg(&to_kicked);                    
                     cur_r.leave(ouid);
             
-                    cur_room_str = format!("{} has been kicked from {}.",
-                                            ku.get_name(), cur_r.get_name());
+                    cur_room_name = cur_r.get_name().to_string();
                 }
                 
                 /* Mutable reference to ctxt.rmap contents (&mut cur_r) drops
@@ -923,7 +922,11 @@ fn do_op(ctxt: &mut Context, op: Op)
             let env = Env::new(
                 Endpoint::Server,
                 Endpoint::Room(ctxt.rid),
-                &Msg::Info(cur_room_str));
+                &Msg::Misc {
+                    what: "kick_other".to_string(),
+                    alt: format!("{} has been kicked from {}.", ku.get_name(), &cur_room_name),
+                    data: vec![ku.get_name().to_string(), cur_room_name],
+                });
             
             return Ok(vec![env]);
         },

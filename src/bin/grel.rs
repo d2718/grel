@@ -205,6 +205,8 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
     if let Some(c) = ipt.first() {
         if *c == gv.cmd {
             
+            /* If the only thing in the input line is a single semicolon,
+            the rest of this tokenizing stuff will panic, so bail here. */
             if ipt.len() == 1 { return; }
             
             /* Collect the ipt vector as a string, discarding the cmd_char and
@@ -581,6 +583,18 @@ fn process_msg(m: Msg,
             "roster" => {
                 if data.len() < 1 { return Err(format!("Incomplete data: {:?}", &m)); }
                 scrn.set_roster(data);
+            },
+            
+            "kick_other" => {
+                if data.len() < 2 { return Err(format!("Incomplete data: {:?}", &m)); }
+                let mut sl = Line::new();
+                sl.push("* ");
+                sl.pushf(&data[0], &scrn.styles().high);
+                sl.push(" has been kicked from ");
+                sl.pushf(&data[1], &scrn.styles().high);
+                sl.push(".");
+                scrn.push_line(sl);
+                gv.socket.enqueue(&ROSTER_REQUEST);
             },
             
             "addr" => {
