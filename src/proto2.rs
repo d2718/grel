@@ -156,6 +156,14 @@ pub enum Msg {
         alt: "grel user moved to another room".to_string(),
     };
     
+    // when a user is kicked from the current channel
+    Misc {
+        what: "kick_other".to_string(),
+        data: vec!["Bad User".to_string(),
+                   "This Room".to_string()],
+        alt: "Bad User has been kicked from This Room.",
+    };
+    
     // when a user changes his or her name
     Misc {
         what: "name".to_string(),
