@@ -70,7 +70,7 @@ It seems there is a need for additional modularization.
 
 ### Repetition
 
-The client is full of things like
+~~The client is full of things like~~
 
 ```rust
 "name" => {
@@ -89,7 +89,12 @@ The client is full of things like
 // less-identical-but-similarly-patterned chunks ...
 ```
 
-And a bunch of these
+UPDATE: 2021-01-17: I have done something about this particular section of
+`respond_to_user_input()`. It's not any _shorter_ or _less repetitive_,
+but it turns `if`s into `match`es and simplifies cases where there are
+_sub_commands.
+
+There are still a bunch of these, though:
 
 ```rust
 let name = match data.get(0) {

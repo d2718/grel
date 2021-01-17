@@ -172,6 +172,32 @@ fn tokenize_the_whitespace_too<'a>(s: &'a str) -> Vec<&'a str> {
     return v;
 }
 
+/** Split a vector of alternating whitespance-and-non tokens (as returned
+by `tokenize_the_whitespace_too(...)` (above) into a vector of `n_cmds`
+"command" words and an "arg" `String` made of the non-command tokens
+concatenated.
+*/
+fn split_command_toks<'a>(toks: &'a [&str], n_cmds: usize)
+-> Result<(Vec<&'a str>, String), ()> {
+    if n_cmds == 0 { return Err(()); }
+    if toks.len() < (2* n_cmds) - 1 { return Err(()); }
+    
+    let mut cmds: Vec<&'a str> = Vec::new();
+    let mut arg: String = String::new();
+    
+    let mut n: usize = 0;
+    for _ in 0..n_cmds {
+        cmds.push(toks[n]);
+        n = n + 2;
+    }
+    while n < toks.len() {
+        arg.push_str(toks[n]);
+        n = n + 1;
+    }
+    
+    return Ok((cmds, arg));
+}
+
 /** In input mode, when the user hits return, this processes processes the
 content of the input line and decides what to do.
 */
@@ -188,114 +214,108 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 
             /* Tokenize the resulting string. */
             let cmd_toks = tokenize_the_whitespace_too(&cmd_line);
-            
-            /* Pre-calculate an upper-bound on the "arg" portion of the
-            command, so multiple allocations need not be made during assembly. */
-            let tot_len = cmd_toks.iter().fold(0usize, |sum, v| sum + v.len());
-            let mut arg = String::with_capacity(tot_len);
-            
             let cmd = cmd_toks[0].to_lowercase();  
             
             match cmd.as_str() {
-                
                 "quit" => {
-                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
-                    let b = Msg::Logout(arg).bytes();
-                    gv.socket.enqueue(&b);
+                    match split_command_toks(&cmd_toks, 1) {
+                        Ok((_, arg)) => {
+                            let b = Msg::Logout(arg).bytes();
+                            gv.socket.enqueue(&b);
+                        },
+                        Err(_) => { return; },
+                    }
                 },
                 
                 "priv" => {
-                    if cmd_toks.len() < 3 {
-                        let mut sl = Line::new();
-                        sl.pushf("# You must specify a recipient for a private message.",
-                                 &scrn.styles().dim);
-                        scrn.push_line(sl);
-                    } else {
-                        let targ = cmd_toks[2].to_string();
-                        if cmd_toks.len() > 4 { for s in &cmd_toks[4..] { arg.push_str(s); } }
-                        let b = Msg::Priv {
-                            who: targ,
-                            text: arg,
-                        }.bytes();
-                        gv.socket.enqueue(&b);
+                    match split_command_toks(&cmd_toks, 2) {
+                        Ok((cmds, arg)) => {
+                            let b = Msg::Priv { who: cmds[1].to_string(), text: arg, }.bytes();
+                            gv.socket.enqueue(&b);
+                        },
+                        Err(_) => {
+                            let mut sl = Line::new();
+                            sl.pushf("# You must specify a recipient for a private message.", &scrn.styles().dim);
+                            scrn.push_line(sl);
+                        },
                     }
                 },
                 
                 "name" => {
-                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
-                    let b = Msg::Name(arg).bytes();
-                    gv.socket.enqueue(&b);
+                    match split_command_toks(&cmd_toks, 1) {
+                        Ok((_, arg)) => {
+                            let b = Msg::Name(arg).bytes();
+                            gv.socket.enqueue(&b);
+                        },
+                        Err(_) => { return; },
+                    }
                 },
                 
                 "join" => {
-                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
-                    let b = Msg::Join(arg).bytes();
-                    gv.socket.enqueue(&b);
+                    match split_command_toks(&cmd_toks, 1) {
+                        Ok((_, arg)) => {
+                            let b = Msg::Join(arg).bytes();
+                            gv.socket.enqueue(&b);
+                        },
+                        Err(_) => { return; },
+                    }
                 },
                 
-                "who" => {
-                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
-                    let b = Msg::Query {
-                        what: "who".to_string(),
-                        arg: arg,
-                    }.bytes();
-                    gv.socket.enqueue(&b);
-                },
-                
-                "rooms" => {
-                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
-                    let b = Msg::Query {
-                        what: "rooms".to_string(),
-                        arg: arg,
-                    }.bytes();
-                    gv.socket.enqueue(&b);
+                "who" | "rooms" => {
+                    match split_command_toks(&cmd_toks, 1) {
+                        Ok((_, arg)) => {
+                            let b = Msg::Query{ what: cmd.clone(), arg: arg, }.bytes();
+                            gv.socket.enqueue(&b);
+                        },
+                        Err(_) => { return; }
+                    }
                 },
                 
                 "block" => {
-                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
-                    let b = Msg::Block(arg).bytes();
-                    gv.socket.enqueue(&b);
+                    match split_command_toks(&cmd_toks, 1) {
+                        Ok((_, arg)) => {
+                            let b = Msg::Block(arg).bytes();
+                            gv.socket.enqueue(&b);
+                        },
+                        Err(_) => { return; },
+                    }
                 },
                 
                 "unblock" => {
-                    if cmd_toks.len() > 2 { for s in &cmd_toks[2..] { arg.push_str(s); } }
-                    let b = Msg::Unblock(arg).bytes();
-                    gv.socket.enqueue(&b);
+                    match split_command_toks(&cmd_toks, 1) {
+                        Ok((_, arg)) => {
+                            let b = Msg::Unblock(arg).bytes();
+                            gv.socket.enqueue(&b);
+                        },
+                        Err(_) => { return; },
+                    }
                 },
                 
                 "op" => {
-                    if cmd_toks.len() < 3 {
-                        let mut sl = Line::new();
-                        sl.pushf(OP_ERROR, &scrn.styles().dim);
-                        scrn.push_line(sl);
-                    } else {
-                        let subcmd = cmd_toks[2].to_lowercase();
-                        let mut msg: Option<Msg> = None;
-                        match subcmd.as_str() {
-                            "open" => { msg = Some(Msg::Op(Op::Open)); },
-                            "close" => { msg = Some(Msg::Op(Op::Close)); },
-                            "ban" | "kick" => {
-                                if cmd_toks.len() > 4 { for s in &cmd_toks[4..] { arg.push_str(s); } }
-                                msg = Some(Msg::Op(Op::Kick(arg)));
-                            },
-                            "invite" => {
-                                if cmd_toks.len() > 4 { for s in &cmd_toks[4..] { arg.push_str(s); } }
-                                msg = Some(Msg::Op(Op::Invite(arg)));
-                            },
-                            "give" => {
-                                if cmd_toks.len() > 4 { for s in &cmd_toks[4..] { arg.push_str(s); } }
-                                msg = Some(Msg::Op(Op::Give(arg)));
-                            },
-                            _ => {
-                                let mut sl = Line::new();
-                                sl.pushf(OP_ERROR, &scrn.styles().dim);
-                                scrn.push_line(sl);
+                    match split_command_toks(&cmd_toks, 2) {
+                        Err(_) => {
+                            let mut sl = Line::new();
+                            sl.pushf(OP_ERROR, &scrn.styles().dim);
+                            scrn.push_line(sl);
+                        },
+                        Ok((cmds, arg)) => {
+                            let msg: Option<Msg> = match cmds[1].to_lowercase().as_str() {
+                                "open"   => Some(Msg::Op(Op::Open)),
+                                "close"  => Some(Msg::Op(Op::Close)),
+                                "ban" | "kick" => Some(Msg::Op(Op::Kick(arg))),
+                                "invite" => Some(Msg::Op(Op::Invite(arg))),
+                                "give"   => Some(Msg::Op(Op::Give(arg))),
+                                _ => {
+                                    let mut sl = Line::new();
+                                    sl.pushf(OP_ERROR, &scrn.styles().dim);
+                                    scrn.push_line(sl);
+                                    None
+                                }
+                            };
+                            if let Some(m) = msg {
+                                gv.socket.enqueue(&m.bytes());
                             }
-                        }
-                        if let Some(m) = msg {
-                            let b = m.bytes();
-                            gv.socket.enqueue(&b);
-                        }
+                        },
                     }
                 },
                 
