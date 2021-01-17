@@ -13,11 +13,12 @@ way to make this more modular in a way that makes sense.~~
 
 This is preliminarily done on 2021-01-16. `process_room(...)` now runs
 from lines 941 to 1084. `greld.rs` has grown to 1222 lines, but I _have_
-1) introduced a new function to specifically handle each of the `proto2::Msg`
-variants from the client, 2) introduced a new structure (`Context`) to hold
-(and pass) all the mutable references that each of these functions needs,
-and 3) written a lot of function calls in a style that takes more vertical
-space.
+
+  1. introduced a new function to specifically handle each of the `proto2::Msg`
+     variants from the client,
+  2. introduced a new structure (`Context`) to hold (and pass) all the mutable
+     references that each of these functions needs, and
+  3. written a lot of function calls in a style that takes more vertical space.
 
 The `do_query(...)` and `do_op(...)` functions are both still pretty long,
 but they do have to handle multiple different types of `Msg::Op`s and
@@ -107,3 +108,7 @@ let message = match data.get(1) {
 
 It'd be nice if I could come up with some way to express these patterns that
 wasn't gratuitously abstract.
+
+UPDATE: As of 2021-01-17, the `Context` struct in the _server_ has had
+some `impl` functions introduced to allow this kind of thing to be collapsed
+into the `?` operator in certain places. The client still needs work.
