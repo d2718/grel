@@ -316,8 +316,8 @@ fn do_join(ctxt: &mut Context, cfg: &ServerConfig, room_name: String)
         return Ok(vec![env]);
     }
     
-    let tgt_rid = match ctxt.rstr.get(&collapsed) {
-        Some(n) => *n,
+    let tgt_rid = match ctxt.grstr(&collapsed) {
+        Some(n) => n,
         None => {
             let new_id = first_free_id(&ctxt.rmap);
             let new_room = Room::new(new_id, room_name.clone(), ctxt.uid);
@@ -332,6 +332,7 @@ fn do_join(ctxt: &mut Context, cfg: &ServerConfig, room_name: String)
     
     let uname: String;
     let uid = ctxt.uid;
+    let rid = ctxt.rid;
     {
         let u = ctxt.gumap(ctxt.uid)?;
         uname = u.get_name().to_string();
@@ -339,8 +340,13 @@ fn do_join(ctxt: &mut Context, cfg: &ServerConfig, room_name: String)
     
     {
         let targ_r = ctxt.grmap_mut(tgt_rid)?;
-        
-        if targ_r.is_banned(&uid) {
+        if tgt_rid == rid {
+            let env = Env::new(
+                Endpoint::Server,
+                Endpoint::User(uid),
+                &Msg::Info(format!("You are already in \"{}\".", targ_r.get_name())));
+            return Ok(vec![env]);
+        } else if targ_r.is_banned(&uid) {
             let env = Env::new(
                 Endpoint::Server,
                 Endpoint::User(uid),
