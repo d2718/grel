@@ -1,15 +1,18 @@
-/*! screen.rs
+/*! `screen.rs` (formerly `ctscreen.rs`)
 
 The `grel` client terminal output manager.
 
-2020-12-30
+This new version uses the
+[`crossterm`](https://github.com/crossterm-rs/crossterm)
+library instead of `termion`.
+
+2021-01-08
 */
 
 use lazy_static::lazy_static;
 use log::{trace};
-use std::io::{Write, stdout};
-use termion::raw::RawTerminal;
-use termion::{cursor, clear};
+use std::io::{Write, Stdout};
+use crossterm::{QueueableCommand, cursor, style, terminal};
 
 use super::line::*;
 
@@ -18,28 +21,95 @@ const VBAR:  char = '│';
 const HBAR:  char = '—';
 
 lazy_static!{
-    static ref DEFAULT_BORDER_BG: Option<BgCol> = None;
-    static ref DEFAULT_BORDER_FG: Option<FgCol> = Some(FgCol::new(1, 1, 1));
-    static ref DEFAULT_HIGH_BG:   Option<BgCol> = None;
-    static ref DEFAULT_HIGH_FG:   Option<FgCol> = Some(FgCol::new(5, 5, 5));
+    static ref DEFAULT_DIM: Style =
+        Style::new(Some(style::Color::AnsiValue(239)), None, None);
+        
+    static ref DEFAULT_DIM_BOLD: Style =
+        Style::new(Some(style::Color::AnsiValue(239)), None, Some(&[style::Attribute::Bold]));
+        
+    static ref DEFAULT_BOLD: Style =
+        Style::new(None, None, Some(&[style::Attribute::Bold]));
+        
+    static ref DEFAULT_HIGHLIGHT: Style =
+        Style::new(Some(style::Color::White), None, None);
+        
+    static ref DEFAULT_HIGHLIGHT_BOLD: Style =
+        Style::new(Some(style::Color::White), None, Some(&[style::Attribute::Bold]));
+                           
+    static ref DEFAULT_REVERSE: Style =
+        Style::new(None, None, Some(&[style::Attribute::Reverse]));
+    
     static ref VBARSTR: String = {
         let mut s = String::new();
         s.push(VBAR);
         s
     };
     
-    static ref RESET_ALL: String = format!("{}{}{}",
-        termion::color::Fg(termion::color::Reset),
-        termion::color::Bg(termion::color::Reset),
-        termion::style::Reset);
+    static ref RESET_ALL: Style =
+        Style::new(Some(style::Color::Reset),
+                   Some(style::Color::Reset),
+                   Some(&[style::Attribute::Reset]));
+}
+
+/** This struct holds the different styles used for text shown by the client.
+This helps maintain a theme, instead of just setting whatever colors and
+attributes wherever.
+*/
+pub struct Styles {
+    pub dim:       Style,
+    pub dim_bold:  Style,
+    pub bold:      Style,
+    pub high:      Style,
+    pub high_bold: Style,
 }
 
 struct Bits {
-    stat_begin: String,
+    stat_begin:       String,
     stat_begin_chars: usize,
-    stat_end: String,
-    stat_end_chars: usize,
-    full_hline: String,
+    stat_end:         String,
+    stat_end_chars:   usize,
+    full_hline:       String,
+}
+
+impl Bits {
+    fn new(sty: &Styles, width: u16) -> Bits {
+        let mut start = Line::new();
+        let mut end   = Line::new();
+        start.pushf(VBARSTR.as_str(), &sty.dim);
+        start.push(" ");
+        end.push(" ");
+        end.pushf(VBARSTR.as_str(), &sty.dim);
+        
+        let mut hline = Line::new();
+        {
+            let mut s = String::with_capacity(width as usize);
+            for _ in 0..width { s.push(HBAR); }
+            hline.pushf(&s, &sty.dim);
+        }
+        
+        let start_len = start.len();
+        let end_len = end.len();
+        
+        Bits {
+            stat_begin: start.first_n_chars(start_len).to_string(),
+            stat_end:   end.first_n_chars(end_len).to_string(),
+            stat_begin_chars: start_len,
+            stat_end_chars:   end_len,
+            full_hline: hline.first_n_chars((width+1) as usize).to_string(),
+        }
+    }
+}
+
+impl std::default::Default for Styles {
+    fn default() -> Self { 
+        Styles {
+            dim: DEFAULT_DIM.clone(),
+            dim_bold: DEFAULT_DIM_BOLD.clone(),
+            bold: DEFAULT_BOLD.clone(),
+            high: DEFAULT_HIGHLIGHT.clone(),
+            high_bold: DEFAULT_HIGHLIGHT_BOLD.clone(),
+        }
+    }
 }
 
 pub struct Screen {
@@ -51,83 +121,96 @@ pub struct Screen {
     stat_ul: Line,
     stat_ur: Line,
     stat_ll: Line,
+    #[allow(dead_code)]
     stat_lr: Line,
     lines_dirty: bool,
     input_dirty: bool,
     roster_dirty: bool,
     stat_dirty: bool,
-    borders_bg: Option<BgCol>,
-    borders_fg: Option<FgCol>,
-    highlight_bg: Option<BgCol>,
-    highlight_fg: Option<FgCol>,
+    styles: Styles,
     bits: Bits,
     
     lines_scroll: u16,
-    lines_scroll_line_n: usize,
     roster_scroll: u16,
     last_x_size: u16,
     last_y_size: u16,
 }
 
 impl Screen {
-    pub fn new<T: Write>(term: &mut RawTerminal<T>, roster_chars: u16) -> Screen {
-        let (x, y): (u16, u16) = termion::terminal_size().unwrap();
-        write!(term, "{}", cursor::Hide).unwrap();
+    pub fn new(term: &mut Stdout, roster_chars: u16) -> crossterm::Result<Screen> {
+        terminal::enable_raw_mode()?;
+        let (x, y): (u16, u16) = terminal::size()?;
+        term.queue(cursor::Hide)?
+            .queue(terminal::DisableLineWrap)?;
+        term.flush()?;
         
-        let new_bits = {
-            let mut start = Line::new();
-            let mut end = Line::new();
-            start.pushf(&VBARSTR, DEFAULT_BORDER_FG.as_ref(),
-                                  DEFAULT_BORDER_BG.as_ref(),
-                                  Style::None);
-            start.push(" ");
-            end.push(" ");
-            end.pushf(&VBARSTR, DEFAULT_BORDER_FG.as_ref(),
-                                DEFAULT_BORDER_BG.as_ref(),
-                                Style::None);
-            let mut hline = Line::new();
-            {
-                let mut s = String::with_capacity(x as usize);
-                for _ in 0..x { s.push(HBAR); }
-                hline.pushf(&s, DEFAULT_BORDER_FG.as_ref(),
-                                DEFAULT_BORDER_BG.as_ref(),
-                                Style::None);
-            }
-            
-            let start_len = start.len();
-            let end_len = end.len();
-            
-            Bits {
-                stat_begin: start.first_n_chars(start_len),
-                stat_begin_chars: start_len,
-                stat_end: end.first_n_chars(end_len),
-                stat_end_chars: end_len,
-                full_hline: hline.first_n_chars((x+1) as usize),
-            }
-        };
+        let stylez = Styles::default();
+        let bitz   = Bits::new(&stylez, x);
         
-        Screen {
+        Ok(Screen {
             lines: Vec::new(), input: Vec::new(), roster: Vec::new(),
             roster_width: roster_chars, input_ip: 0,
             stat_ul: Line::new(), stat_ur: Line::new(),
             stat_ll: Line::new(), stat_lr: Line::new(),
             lines_dirty: true,  input_dirty: true,
             roster_dirty: true, stat_dirty: true,
-            borders_bg:   DEFAULT_BORDER_BG.clone(),
-            borders_fg:   DEFAULT_BORDER_FG.clone(),
-            highlight_bg: DEFAULT_HIGH_BG.clone(),
-            highlight_fg: DEFAULT_HIGH_FG.clone(),
             lines_scroll: 0, roster_scroll: 0,
-            lines_scroll_line_n: 0,
             last_x_size: x, last_y_size: y,
-            bits: new_bits,
-        }
+            styles: stylez,
+            bits: bitz,
+        })
     }
     
-    pub fn bbg(&self) -> Option<&BgCol> { self.borders_bg.as_ref() }
-    pub fn bfg(&self) -> Option<&FgCol> { self.borders_fg.as_ref() }
-    pub fn hbg(&self) -> Option<&BgCol> { self.highlight_bg.as_ref() }
-    pub fn hfg(&self) -> Option<&FgCol> { self.highlight_fg.as_ref() }
+    /** Return a reference to the `Styles` struct that contains the styles
+    used by this `Screen`. These should be used in calls to
+    `ctline::Line::pushf()`.
+    */
+    pub fn styles(&self) -> &Styles { &(self.styles) }
+    
+    /** Set the color scheme for the terminal. `u8`s are ANSI color numbers;
+    setting `underline` true specifies using underlining in place of bold
+    text.
+    */
+    pub fn set_styles(
+        &mut self,
+        dim_fg:  Option<u8>,
+        dim_bg:  Option<u8>,
+        high_fg: Option<u8>,
+        high_bg: Option<u8>,
+        underline: bool,
+    ) {
+        let dfg = match dim_fg {
+            None    => None,
+            Some(n) => Some(style::Color::AnsiValue(n)),
+        };
+        let dbg = match dim_bg {
+            None    => None,
+            Some(n) => Some(style::Color::AnsiValue(n)),
+        };
+        let hfg = match high_fg {
+            None    => None,
+            Some(n) => Some(style::Color::AnsiValue(n)),
+        };
+        let hbg = match high_bg {
+            None    => None,
+            Some(n) => Some(style::Color::AnsiValue(n)),
+        };
+        let attr = match underline {
+            true  => style::Attribute::Underlined,
+            false => style::Attribute::Bold,
+        };
+        
+        let new_styles = Styles {
+            dim:        Style::new(dfg, dbg, None),
+            dim_bold:   Style::new(dfg, dbg, Some(&[attr])),
+            bold:       Style::new(None, None, Some(&[attr])),
+            high:       Style::new(hfg, hbg, None),
+            high_bold:  Style::new(hfg, hbg, Some(&[attr])),
+        };
+        
+        self.styles = new_styles;
+        self.bits = Bits::new(&self.styles, self.last_x_size);
+    }
     
     /** Return the height of the main scrollback window. */
     pub fn get_main_height(&self) -> u16 { self.last_y_size - 2 }
@@ -275,8 +358,8 @@ impl Screen {
             let mut s = String::with_capacity(cols as usize);
             for _ in 0..cols { s.push(HBAR); }
             let mut hl = Line::new();
-            hl.pushf(&s, self.bfg(), self.bbg(), Style::None);
-            self.bits.full_hline = hl.first_n_chars(cols as usize);
+            hl.pushf(&s, &self.styles.dim);
+            self.bits.full_hline = hl.first_n_chars(cols as usize).to_string();
         }
         if (cols != self.last_x_size) || (rows != self.last_y_size) {
             self.lines_dirty = true;
@@ -288,36 +371,35 @@ impl Screen {
         }
     }
     
-    /** Automatically set the size of the `Screen` to be the whole
-    terminal window.
-    */
-    pub fn auto_resize(&mut self) {
-        let (x, y): (u16, u16) = termion::terminal_size().unwrap();
-        self.resize(x, y);
-    }
-    
-    fn refresh_lines<T: Write>(&mut self, term: &mut RawTerminal<T>,
-                     width: u16, height: u16) {
+    fn refresh_lines(
+        &mut self,
+        term: &mut Stdout,
+        width: u16,
+        height: u16
+    ) -> crossterm::Result<()> {
+        
         trace!("Screen::refresh_lines(..., {}, {}) called", &width, &height);
         let blank: String = {
             let mut s = String::new();
             for _ in 0..width { s.push(SPACE); }
             s
         };
-        let mut y = height;
+        let mut y = height - 1;
         let w = width as usize;
         let mut count_back: u16 = 0;
         for aline in self.lines.iter_mut().rev() {
             for row in aline.lines(w).iter().rev() {
-                if y == 1 { break; }
+                if y == 0 { break; }
                 if count_back >= self.lines_scroll {
-                    write!(term, "{}{}\r{}", cursor::Goto(1, y), &blank, &row)
-                        .unwrap();
+                    term.queue(cursor::MoveTo(0, y))?
+                        .queue(style::Print(&blank))?
+                        .queue(cursor::MoveToColumn(0))?
+                        .queue(style::Print(&row))?;
                     y -= 1;
                 }
                 count_back += 1;
             }
-            if y == 1 { break; }
+            if y == 0 { break; }
         }
         
         /* Check to see if we've scrolled past the end of the scrollback,
@@ -327,50 +409,62 @@ impl Screen {
             let adjust: i16 = (y - 1) as i16;
             self.scroll_lines(-adjust);
         } else {
-            while y > 1 {
-                write!(term, "{}{}", cursor::Goto(1, y), &blank).unwrap();
+            while y > 0 {
+                term.queue(cursor::MoveTo(0, y))?
+                    .queue(style::Print(&blank))?;
                 y -= 1;
             }
             self.lines_dirty = false;
         }
+        Ok(())
     }
     
-    fn refresh_roster<T: Write>(&mut self, term: &mut RawTerminal<T>,
-                      xstart: u16, height: u16) {
+    fn refresh_roster(
+        &mut self, term:
+        &mut Stdout,
+        xstart: u16,
+        height: u16
+    ) -> crossterm::Result<()> {
+        
         trace!("Screen::refresh_roster(..., {}, {}) called", &xstart, &height);
         let rrw: usize = (self.roster_width as usize) + 1;
+        let urw: usize = self.roster_width as usize;
         
         let blank: String = {
             let mut s = String::new();
             for _ in 0..self.roster_width { s.push(SPACE); }
             let mut l = Line::new();
-            l.pushf(&VBARSTR, self.bfg(), self.bbg(), Style::None);
+            l.pushf(VBARSTR.as_str(), &self.styles.dim);
             l.push(&s);
-            l.first_n_chars(rrw)
+            l.first_n_chars(rrw).to_string()
         };
-        let mut y: u16 = 2;
+        let mut y: u16 = 1;
+        let targ_y = height - 1;
         let us_scroll = self.roster_scroll as usize;
-        for (i, aline) in self.roster.iter().enumerate() {
-            if y == height { break; }
+        for (i, aline) in self.roster.iter_mut().enumerate() {
+            if y == targ_y { break; }
             if i >= us_scroll {
-                write!(term, "{}{}{}{}", cursor::Goto(xstart, y),
-                       &blank, cursor::Goto(xstart+1, y),
-                       aline.first_n_chars(self.roster_width as usize))
-                    .unwrap();
+                term.queue(cursor::MoveTo(xstart, y))?
+                    .queue(style::Print(&blank))?
+                    .queue(cursor::MoveTo(xstart+1, y))?
+                    .queue(style::Print(aline.first_n_chars(urw)))?;
                 y += 1;
             }
         }
-        while y <= height {
-            write!(term, "{}{}", cursor::Goto(xstart, y), &blank).unwrap();
+        while y < height {
+            term.queue(cursor::MoveTo(xstart, y))?
+                .queue(style::Print(&blank))?;
             y += 1;
         }
         self.roster_dirty = false;
+        Ok(())
     }
     
-    fn refresh_input<T: Write>(&mut self, term: &mut RawTerminal<T>) {
-        write!(term, "{}{}{}", cursor::Goto(1, self.last_y_size),
-                               clear::CurrentLine,
-                               cursor::Goto(1, self.last_y_size)).unwrap();
+    fn refresh_input(&mut self, term: &mut Stdout) -> crossterm::Result<()> {
+        term.queue(cursor::MoveTo(0, self.last_y_size - 1))?
+            .queue(terminal::Clear(terminal::ClearType::CurrentLine))?
+            .queue(cursor::MoveToColumn(0))?;
+        
         let third = self.last_x_size / 3;
         let maxpos = self.last_x_size - third;
         let startpos = {
@@ -399,32 +493,35 @@ impl Screen {
         for i in (startpos as usize)..(endpos as usize) {
             let c = self.input[i];
             if i == input_ip_us {
-                write!(term, "{}{}{}", termion::style::Invert,
-                                       c, termion::style::Reset).unwrap();
+                let cch = style::style(c).attribute(style::Attribute::Reverse);
+                term.queue(style::PrintStyledContent(cch))?;
             } else {
-                write!(term, "{}", c).unwrap();
+                term.queue(style::Print(c))?;
             }
         }
         if input_ip_us == self.input.len() {
-            write!(term, "{}{}{}", termion::style::Invert, SPACE,
-                                   termion::style::Reset).unwrap();
+            let cch = style::style(SPACE).attribute(style::Attribute::Reverse);
+            term.queue(style::PrintStyledContent(cch))?;
         }
         
         self.input_dirty = false;
+        Ok(())
     }
     
-    fn refresh_stat<T: Write>(&mut self, term: &mut RawTerminal<T>) {
+    fn refresh_stat(&mut self, term: &mut Stdout) -> crossterm::Result<()> {
         trace!("Screen::refresh_stat(...) called");
         
         /* Lower left corner (there is no lower-right as of yet). */
         let stat_pad = 2 + self.bits.stat_begin_chars + self.bits.stat_end_chars;
         let stat_room = (self.last_x_size as usize) - stat_pad;
-        write!(term, "{}{}{}{}{}{}", cursor::Goto(1, self.last_y_size-1),
-                     &self.bits.full_hline,
-                     cursor::Goto(2, self.last_y_size-1),
-                     &self.bits.stat_begin,
-                     &self.stat_ll.first_n_chars(stat_room),
-                     &self.bits.stat_end).unwrap();
+        let ll_y = self.last_y_size - 2;
+        
+        term.queue(cursor::MoveTo(0, ll_y))?
+            .queue(style::Print(&self.bits.full_hline))?
+            .queue(cursor::MoveTo(1, ll_y))?
+            .queue(style::Print(&self.bits.stat_begin))?
+            .queue(style::Print(self.stat_ll.first_n_chars(stat_room)))?
+            .queue(style::Print(&self.bits.stat_end))?;
         
         /* Upper left and right corners. */
         
@@ -439,49 +536,64 @@ impl Screen {
         let space_each: usize = (tot_space / 2) as usize;
         let abbrev_space = space_each - 3;
         
-        write!(term, "{}{}{}", cursor::Goto(1, 1), &self.bits.full_hline,
-                               cursor::Goto(2, 1)).unwrap();
+        term.queue(cursor::MoveTo(0, 0))?
+            .queue(style::Print(&self.bits.full_hline))?
+            .queue(cursor::MoveTo(1, 0))?
+            .queue(style::Print(&self.bits.stat_begin))?;
         if self.stat_ul.len() > space_each {
-            write!(term, "{}{}...{}", &self.bits.stat_begin,
-                         &self.stat_ul.first_n_chars(abbrev_space),
-                         &self.bits.stat_end).unwrap();
+            term.queue(style::Print(self.stat_ul.first_n_chars(abbrev_space)))?
+                .queue(style::Print("..."))?;
         } else {
-            write!(term, "{}{}{}", &self.bits.stat_begin,
-                         &self.stat_ul.first_n_chars(space_each),
-                         &self.bits.stat_end).unwrap();
+            term.queue(style::Print(self.stat_ul.first_n_chars(space_each)))?;
         }
+        term.queue(style::Print(&self.bits.stat_end))?;
         
+        let ur_offs: u16 = match self.stat_ur.len() > space_each {
+            true => self.last_x_size -
+                        (2 + self.bits.stat_begin_chars +
+                             self.bits.stat_end_chars +
+                              space_each) as u16,
+            false => self.last_x_size -
+                        (2 + self.bits.stat_begin_chars +
+                             self.bits.stat_end_chars +
+                             self.stat_ur.len()) as u16,
+        };
+        
+        term.queue(cursor::MoveTo(ur_offs, 0))?
+            .queue(style::Print(&self.bits.stat_begin))?;
         if self.stat_ur.len() > space_each {
-            let ur_offs: u16 = self.last_x_size -
-                              (1 + self.bits.stat_begin_chars +
-                                    self.bits.stat_end_chars +
-                                    space_each) as u16;
-            write!(term, "{}{}{}...{}", cursor::Goto(ur_offs, 1),
-                         &self.bits.stat_begin,
-                         &self.stat_ur.first_n_chars(abbrev_space),
-                         &self.bits.stat_end).unwrap();
+            term.queue(style::Print(self.stat_ur.first_n_chars(abbrev_space)))?
+                .queue(style::Print("..."))?;
         } else {
-            let ur_offs: u16 = self.last_x_size -
-                              (1 + self.bits.stat_begin_chars +
-                                    self.bits.stat_end_chars +
-                                    self.stat_ur.len()) as u16;
-            write!(term, "{}{}{}{}", cursor::Goto(ur_offs, 1),
-                        &self.bits.stat_begin,
-                        &self.stat_ur.first_n_chars(space_each),
-                        &self.bits.stat_end).unwrap();
+            term.queue(style::Print(self.stat_ur.first_n_chars(space_each)))?;
         }
+        term.queue(style::Print(&self.bits.stat_end))?;
         
         self.stat_dirty = false;
+        Ok(())
+    }
+    
+    fn announce_term_too_small(
+        &self,
+        term: &mut Stdout
+    ) -> crossterm::Result<()> {
+        
+        term.queue(terminal::Clear(terminal::ClearType::All))?
+            .queue(cursor::MoveTo(0, 0))?
+            .queue(style::Print("The terminal window is too small. Please make it larger."))?;
+        term.flush()?;
+        
+        Ok(())
     }
     
     /** Redraw any parts of the `Screen` that have changed since the last
     call to `.refresh()`.
     */
-    pub fn refresh<T: Write>(&mut self, term: &mut RawTerminal<T>) {
+    pub fn refresh(&mut self, term: &mut Stdout) -> Result<(), String>{
         //trace!("Screen::refresh(...) called");
-        if !(self.lines_dirty  || self.input_dirty ||
+        if !(self.lines_dirty || self.input_dirty  ||
                                  self.roster_dirty || self.stat_dirty) {
-            return;
+            return Ok(());
         }
         
         let rost_w = self.roster_width + 1;
@@ -489,37 +601,48 @@ impl Screen {
         let main_h = self.last_y_size - 2;
         
         if (main_w < 20) || (main_h < 5) {
-            write!(term, "{}{}The terminal window is too small. Please make it larger.",
-                    clear::All, cursor::Goto(1, 1)).unwrap();
-            term.flush().unwrap();
-            return;
+            match self.announce_term_too_small(term) {
+                Err(e) => { return Err(format!("{}", e)); },
+                Ok(_) => { return Ok(()); },
+            }
         }
         
         if self.input_dirty {
-            self.refresh_input(term);
-            /* Each of these resetting write!s kind of a hack. */
-            write!(term, "{}", RESET_ALL.as_str()).unwrap();
+            if let Err(e) = self.refresh_input(term) {
+                return Err(format!("{}", e));
+            }
         }
         if self.lines_dirty {
-            self.refresh_lines(term, main_w, main_h);
-            write!(term, "{}", RESET_ALL.as_str()).unwrap();
+            if let Err(e) = self.refresh_lines(term, main_w, main_h) {
+                return Err(format!("{}", e));
+            }
         }
         if self.roster_dirty {
-            self.refresh_roster(term, main_w+1, main_h);
-            write!(term, "{}", RESET_ALL.as_str()).unwrap();
+            if let Err(e) = self.refresh_roster(term, main_w, main_h) {
+                return Err(format!("{}", e));
+            }
         }
         if self.stat_dirty {
-            self.refresh_stat(term);
-            write!(term, "{}", RESET_ALL.as_str()).unwrap();
+            if let Err(e) = self.refresh_stat(term) {
+                return Err(format!("{}", e));
+            }
         }
-        term.flush().unwrap();
+        
+        if let Err(e) = term.flush() {
+            return Err(format!("{}", e));
+        }
+        
+        Ok(())
     }
 }
 
 impl Drop for Screen {
     fn drop(&mut self) {
-        let mut stdout = stdout();
-        write!(stdout, "{}{}\n", cursor::Show, clear::All).unwrap();
-        stdout.flush().unwrap();
+        let mut term = std::io::stdout();
+        term.queue(cursor::Show).unwrap()
+            .queue(terminal::EnableLineWrap).unwrap()
+            .queue(terminal::Clear(terminal::ClearType::All)).unwrap();
+        term.flush().unwrap();
+        terminal::disable_raw_mode().unwrap();
     }
 }

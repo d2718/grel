@@ -21,8 +21,8 @@ use crossterm::{event, event::Event, event::KeyCode };
 use grel::proto2::{Msg, Op};
 use grel::sock::Sock;
 use grel::config::ClientConfig;
-use grel::ctline::Line;
-use grel::ctscreen::Screen;
+use grel::line::Line;
+use grel::screen::Screen;
 
 const JIFFY: std::time::Duration = std::time::Duration::from_millis(0);
 

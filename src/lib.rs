@@ -4,11 +4,6 @@ pub mod room;
 pub mod unidata;
 pub mod config;
 pub mod proto2;
+pub mod line;
+pub mod screen;
 
-// New crossterm module versions.
-pub mod ctline;
-pub mod ctscreen;
-
-// Old termion module versions.
-//pub mod line;
-//pub mod screen;
