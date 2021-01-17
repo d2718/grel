@@ -487,43 +487,35 @@ fn process_msg(m: Msg,
         
         Msg::Misc { ref what, ref data, ref alt } => match what.as_str() {
             "join" => {
-                let name = match data.get(0) {
-                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
-                    Some(x) => x,
+                let (name, room) = match &data[..] {
+                    [x, y] => (x, y),
+                    _ => { return Err(format!("Incomplete data: {:?}", &m)); },
                 };
                 let mut sl = Line::new();
                 sl.push("* ");
                 if name.as_str() == gv.uname.as_str() {
                     sl.pushf("You", &scrn.styles().bold);
                     sl.push(" join ");
-                    if let Some(rm) = data.get(1) {
-                        gv.rname = rm.clone();
-                        let mut room_line = Line::new();
-                        room_line.pushf(&gv.rname, &scrn.styles().high);
-                        scrn.set_stat_ur(room_line);
-                    }
+
+                    /* Set room name in upper-right status line. */
+                    gv.rname = room.to_string();
+                    let mut room_line = Line::new();
+                    room_line.pushf(&gv.rname, &scrn.styles().high);
+                    scrn.set_stat_ur(room_line);
                 } else {
                     sl.pushf(name, &scrn.styles().high);
                     sl.push(" joins ");
                 }
-                if let Some(rm) = data.get(1) {
-                    sl.pushf(rm, &scrn.styles().high);
-                } else {
-                    sl.push("the server");
-                }
+                sl.pushf(room, &scrn.styles().high);
                 sl.push(".");
                 gv.socket.enqueue(&ROSTER_REQUEST);
                 scrn.push_line(sl);
             },
             
             "leave" => {
-                let name = match data.get(0) {
-                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
-                    Some(x) => x,
-                };
-                let message = match data.get(1) {
-                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
-                    Some(x) => x,
+                let (name, message) = match &data[..] {
+                    [x, y] => (x, y),
+                    _ => { return Err(format!("Incomplete data: {:?}", &m)); },
                 };
                 let mut sl = Line::new();
                 sl.push("* ");
@@ -535,13 +527,9 @@ fn process_msg(m: Msg,
             },
             
             "priv_echo" => {
-                let name = match data.get(0) {
-                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
-                    Some(x) => x,
-                };
-                let text = match data.get(1) {
-                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
-                    Some(x) => x,
+                let (name, text) = match &data[..] {
+                    [x, y] => (x, y),
+                    _ => { return Err(format!("Incomplete data: {:?}", &m)); }
                 };
                 let mut sl = Line::new();
                 sl.push("$ ");
@@ -554,13 +542,9 @@ fn process_msg(m: Msg,
             },
             
             "name" => {
-                let old = match data.get(0) {
-                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
-                    Some(x) => x,
-                };
-                let new = match data.get(1) {
-                    None => { return Err(format!("Incomplete data: {:?}", &m)); },
-                    Some(x) => x,
+                let (old, new) = match &data[..] {
+                    [x, y] => (x, y),
+                    _ => { return Err(format!("Incomplete data: {:?}", &m)); },
                 };
                 
                 let mut sl = Line::new();
@@ -586,12 +570,15 @@ fn process_msg(m: Msg,
             },
             
             "kick_other" => {
-                if data.len() < 2 { return Err(format!("Incomplete data: {:?}", &m)); }
+                let (name, room) = match &data[..] {
+                    [x, y] => (x, y),
+                    _ => { return Err(format!("Incomplete data: {:?}", &m)); },
+                };
                 let mut sl = Line::new();
                 sl.push("* ");
-                sl.pushf(&data[0], &scrn.styles().high);
+                sl.pushf(name, &scrn.styles().high);
                 sl.push(" has been kicked from ");
-                sl.pushf(&data[1], &scrn.styles().high);
+                sl.pushf(room, &scrn.styles().high);
                 sl.push(".");
                 scrn.push_line(sl);
                 gv.socket.enqueue(&ROSTER_REQUEST);

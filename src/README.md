@@ -89,12 +89,10 @@ It seems there is a need for additional modularization.
 // less-identical-but-similarly-patterned chunks ...
 ```
 
-UPDATE: 2021-01-17: I have done something about this particular section of
+UPDATE 2021-01-17: I have done something about this particular section of
 `respond_to_user_input()`. It's not any _shorter_ or _less repetitive_,
 but it turns `if`s into `match`es and simplifies cases where there are
 _sub_commands.
-
-There are still a bunch of these, though:
 
 ```rust
 let name = match data.get(0) {
@@ -111,9 +109,20 @@ let message = match data.get(1) {
 
 ```
 
-It'd be nice if I could come up with some way to express these patterns that
-wasn't gratuitously abstract.
+UPDATE 2017-01-17: _Some_ of the above noise was reduced with a
+destructuring slice match. The above code became
+
+```rust
+let (name, message) = match &data[..] => {
+    [x, y] => (x, y),
+    _ => { return Err(format!("Incomplete data: {:?}", &m)); },
+};
+```
+
+which is nicer, at least in the case that the `data` vector of the
+`Msg::Misc` variant has multiple elements.
 
 UPDATE: As of 2021-01-17, the `Context` struct in the _server_ has had
 some `impl` functions introduced to allow this kind of thing to be collapsed
-into the `?` operator in certain places. The client still needs work.
+into the `?` operator in certain places. The client still ~~needs~~ might
+be able to use some work.
