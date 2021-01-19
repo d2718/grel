@@ -2,7 +2,7 @@
 sock.rs
 
 A non-blocking socket wrapper for sending and receiving JSON-encoded
-`protocol::Msg` objects.
+`proto2::Msg` objects.
 
 updated: 2020-11-28
 
@@ -111,7 +111,7 @@ fn get_actual_offset(dat: &[u8], e: &serde_json::Error)
 }
 
 /**
-The `sock::Sock` wraps a `std::net::TcpStream` and exchanges `protocol::Msg`
+The `sock::Sock` wraps a `std::net::TcpStream` and exchanges `proto2::Msg`
 objects over it.
 
 It's default mode is entirely non-blocking, and suitable for single-threaded
@@ -199,7 +199,7 @@ impl Sock {
         }
     }
     
-    /** Attempts to decode a `protocol::Msg` from its internal buffer of
+    /** Attempts to decode a `proto2::Msg` from its internal buffer of
     data read from the underlying stream. A returned error value means
     the stream is receiving syntactically bad data and should probably be
     shut down. A returned `Ok(None)` means there isn't enough data in the
