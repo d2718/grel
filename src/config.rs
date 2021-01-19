@@ -8,7 +8,7 @@ The `grel` configuration structs and mechanism.
 to (try to) determine an appropriate location for configuration files.
 If it can't, it will look to load (or generate) one in the current directory.
 
-2021-01-18
+2021-01-19
 */
 use std::time::Duration;
 use std::path::{Path, PathBuf};
@@ -24,6 +24,8 @@ const NAME:           &str = "grel user";
 const LOBBY_NAME:     &str = "Lobby";
 const WELCOME:        &str = "Welcome to a grel server.";
 const SERVER_TICK:     u64 = 100;
+const BYTE_LIMIT:    usize = 512;
+const BYTE_TICK:     usize = 6;
 const CLIENT_TICK:     u64 = 100;
 const BLOCK_TIMEOUT:   u64 = 5000;
 const READ_SIZE:     usize = 1024;
@@ -56,6 +58,8 @@ struct ServerConfigFile {
     welcome: String,
     log_file: String,
     log_level: u8,
+    byte_limit: usize,
+    bytes_per_tick: usize,
 }
 
 /** `GrelConfigFile` implements `Default` because this is the mechanism
@@ -75,6 +79,8 @@ impl std::default::Default for ServerConfigFile {
             welcome: String::from(WELCOME),
             log_file: String::from(SERVER_LOG),
             log_level: 5,
+            byte_limit: BYTE_LIMIT,
+            bytes_per_tick: BYTE_TICK,
         }
     }
 }
@@ -94,6 +100,8 @@ pub struct ServerConfig {
     pub welcome: String,
     pub log_file: String,
     pub log_level: LevelFilter,
+    pub byte_limit: usize,
+    pub byte_tick: usize,
 }
 
 impl ServerConfig {
@@ -147,6 +155,8 @@ impl ServerConfig {
             welcome: cfgf.welcome,
             log_file: cfgf.log_file,
             log_level: logl,
+            byte_limit: cfgf. byte_limit,
+            byte_tick: cfgf.bytes_per_tick,
         }
     }
 }

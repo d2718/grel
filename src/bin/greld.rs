@@ -3,7 +3,7 @@ greld.rs
 
 The `grel` daemon (server) process.
 
-updated 2021-01-16
+updated 2021-01-19
 */
 
 use std::collections::HashMap;
@@ -991,7 +991,14 @@ fn process_room(
                 },
                 Some(x) => x,
             };
-            mu.drain_byte_quota(BYTES_PER_TICK);
+            
+            let over_quota = mu.get_byte_quota() > cfg.byte_limit;
+            mu.drain_byte_quota(cfg.byte_tick);
+            if over_quota && mu.get_byte_quota() <= cfg.byte_limit {
+                let msg = Msg::err("You may send messages again.");
+                mu.deliver_msg(&msg);
+            }
+            
             match mu.try_get() {
                 None => {
                     let last = mu.get_last_data_time();
@@ -1006,7 +1013,17 @@ fn process_room(
                     }
                     continue;
                 },
-                Some(msg) => { m = msg; }
+                Some(msg) => {
+                    if !over_quota {
+                        m = msg;
+                        if mu.get_byte_quota() > cfg.byte_limit {
+                            let msg = Msg::err("You have exceeded your data quota and your messages will be ignored for a short time.");
+                            mu.deliver_msg(&msg);
+                        }
+                    } else {
+                        continue;
+                    }
+                }
             }
         }
         

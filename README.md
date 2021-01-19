@@ -180,16 +180,18 @@ it will probably be similarly placed on yours. You should make its contents
 look something like this:
 
 ```toml
-address = '192.168.1.13:51516'
+address = "192.168.1.13:51516"
 tick_ms = 500
 blackout_to_ping_ms  = 10000
 blackout_to_kick_ms  = 20000
 max_user_name_length = 24
 max_room_name_length = 32
 lobby_name = 'Lobby'
-welcome = "Welcome to a grel server.'
+welcome = "Welcome to a grel server."
 log_file = 'greld.log'
 log_level = 1
+byte_limit = 512
+bytes_per_tick = 6
 ```
 
 although you may want to change the `address` value to match where you want
@@ -205,8 +207,9 @@ and you may want to redirect `stdout` to a specific file.
 
 ### TODO (server):
 
-  * Rate-limiting. There is some provision for rate-limiting built into
-    the `User` struct, but currently the server does nothing with it.
+  * ~~Rate-limiting. There is some provision for rate-limiting built into
+    the `User` struct, but currently the server does nothing with it.~~
+    semi-crudely done 2021-01-19; might do a better job later, idk
 
   * ~~Users should be able to send private messages to each other.~~ done
     2021-01-03
