@@ -330,7 +330,7 @@ mod test {
     use std::thread;
     
     static SLEEP_T: Duration = Duration::from_millis(100);
-    const ADDR: &str = "127.0.0.1:51516";
+    const ADDR: &str = "127.0.0.1:51517";
     
     #[test]
     fn two_way_test() {

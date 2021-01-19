@@ -260,3 +260,11 @@ and you may want to redirect `stdout` to a specific file.
 
 I am happy to entertain feature requests, but simplicity is a goal.
 
+### A final confession
+
+Test coverage is poor. Some of the modules have tests for some of the
+functions and methods. Mostly this is just because I am lazy, and _most_
+of what transpires between the various elements in this software is simple.
+Much of the client functionality is poorly-tested because it's dificult to
+write tests for terminal output---here, the tests tend to be things you
+look at and say, "Yeah, that looks right."

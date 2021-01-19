@@ -11,6 +11,7 @@ use std::net::TcpListener;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Instant, Duration};
+#[allow(unused_imports)]
 use log::{debug, warn, trace};
 use simplelog::WriteLogger;
 
@@ -23,7 +24,6 @@ use grel::config::ServerConfig;
 // const DEBUG: bool = true;
 
 static BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
-static BYTES_PER_TICK: usize = 6;
 
 /* The Context is instantiated in process_room() and passed to each of
 the functions that handles receiving messages from clients.
