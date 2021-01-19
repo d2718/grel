@@ -59,7 +59,7 @@ takes owned `String`s.
 
 ### Client spaghetti
 
-Client functionality is split up into several modules (`ctscreen`, `ctline`,
+Client functionality is split up into several modules (`screen`, `line`,
 `sock`, partially `config`), but there doesn't seem to be enough separation
 of concerns, and they seem to all have their hands in each others' pockets.
 For example, `crossterm` stuff leaks into several of them, _as well as_ the

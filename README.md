@@ -12,11 +12,10 @@ variety of features) should be easily implementable in any number of languages.
 
 ### State
 
-Both `greld` and `grel` work, at least on Debian 10, and, I suspect, any
-vaguely POSIX-y system that sports Rust's `cargo`. There are still features
-as yet to be implemented, like blocking, private messaging, and channel
-(or `Room`, in the parlance of this particular piece of software) operator
-functions. (See the TODO sections, below, for more details.)
+Both `greld` and `grel` work, at least on Debian 10 and Windows 10, and, I
+suspect, any vaguely POSIX-y system that sports Rust's `cargo`. There are
+still features as yet to be implemented, like rate limiting and more
+effective blocking (See the TODO sections, below, for more details.)
 
 ### Installation
 
@@ -27,8 +26,9 @@ will build both the `grel` client and the `greld` server.
 
 #### Configuration
 
-Run `grel -g` to generate a default config file; this will show up at
-`your_normal_config_dir/grel/grel.toml`. The defaults are sane, but you'll
+Run `grel -g` to generate a default config file; this will probably show up at
+`your_normal_config_dir/grel.toml`, but it might not. In any case, a message
+will print with the path of the new file. The defaults are sane, but you'll
 probably want to at least set the server address. The config options (and
 their default values) are
 
@@ -53,8 +53,8 @@ their default values) are
   * `read_size = 1024`
     The the amount (in bytes) the client attempts to read from its connection
     with the server each time through the main loop. The default amount
-    is almost undoubtedly fine. Setting this to 0 will render the client
-    inoperable; setting this to a very low number will impact your experience.
+    is almost undoubtedly fine. Setting this to a very low number will impact
+    your experience; setting this to 0 will render the client inoperable.
 
   * `roster_width = 24`
     Number of characters wide to draw the panel that holds the current `Room`'s

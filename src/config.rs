@@ -1,17 +1,22 @@
 /*!
 config.rs
 
-The `grel` configuration struct and mechanism.
+The `grel` configuration structs and mechanism.
 
-`grel` uses `confy` to read a configuration from a `.toml` file stored
-in the "usual" place (`~/.config/grel/grel.toml` is one location; you may
-need to play around with `confy` to figure out others).
+`grel` uses
+[the `directories` crate](https://docs.rs/directories/3.0.1/directories/)
+to (try to) determine an appropriate location for configuration files.
+If it can't, it will look to load (or generate) one in the current directory.
 
-2021-01-11
+2021-01-18
 */
 use std::time::Duration;
-use directories::BaseDirs;
+use std::path::{Path, PathBuf};
+
 use simplelog::LevelFilter;
+
+const CLIENT_NAME: &str = "grel.toml";
+const SERVER_NAME: &str = "greld.toml";
 
 const ADDR:           &str = "127.0.0.1:51516";
 const SERVER_LOG:     &str = "greld.log";
@@ -26,6 +31,13 @@ const ROSTER_WIDTH:    u16 = 24;
 const CMD_CHAR:       char = ';';
 const MIN_SCROLLBACK: usize = 1000;
 const MAX_SCROLLBACK: usize = 2000;
+
+fn default_config_dir() -> PathBuf {
+    match directories::BaseDirs::new() {
+        None => PathBuf::new(),
+        Some(d) => d.config_dir().to_path_buf(),
+    }
+}
 
 /** The `GrelConfigFile` deserializes from a `.toml` file to a struct
 of Rust primitives. Its values are then translated into less primitive
@@ -90,11 +102,24 @@ impl ServerConfig {
     and returns a `ServerConfig` struct.
     */
     pub fn configure() -> ServerConfig {
-        let cfgf: ServerConfigFile = match confy::load("greld") {
-            Ok(x) => x,
+        
+        let mut cfg_path = default_config_dir();
+        cfg_path.push(SERVER_NAME);
+        
+        let cfgf: ServerConfigFile = match std::fs::read_to_string(&cfg_path) {
+            Ok(s) => match toml::from_str(&s) {
+                Ok(x) => x,
+                Err(e) => {
+                    println!("Error parsing config file {}: {}",
+                             &cfg_path.display(), &e);
+                    std::process::exit(1);
+                },
+            },
             Err(e) => {
-                println!("Error loading configuration: {}", e);
-                std::process::exit(1);
+                println!("Error reading config file {}: {}",
+                         &cfg_path.display(), &e);
+                println!("Using default configuration.");
+                ServerConfigFile::default()
             },
         };
         
@@ -197,20 +222,24 @@ pub struct ClientConfig {
 
 impl ClientConfig {
     pub fn configure(path: Option<&str>) -> Result<ClientConfig, String> {
-        /* I think I let myself get carried away with the matches here.
-        The inner match matches on the option argument, calling a different
-        confy function depending on whether a filename is supplied; the
-        outer match matches on the Result from whichever function was called.
-        */
-        let f: ClientConfigFile = match {
-            match path {
-                None =>    confy::load("grel"),
-                Some(s) => confy::load_path(s),
-            }
-        } {
-            Ok(x) => x,
+        let cfg_path = match path {
+            Some(s) => Path::new(&s).to_path_buf(),
+            None => {
+                let mut p = default_config_dir().to_path_buf();
+                p.push(CLIENT_NAME);
+                p
+            },
+        };
+        
+        let f: ClientConfigFile = match std::fs::read_to_string(&cfg_path) {
+            Ok(s) => match toml::from_str(&s) {
+                Ok(x) => x,
+                Err(e) => { return Err(format!("Error parsing config file: {}", &e)); },
+            },
             Err(e) => {
-                return Err(format!("Error loading configuration: {}", e));
+                println!("Error reading config file: {}", &e);
+                println!("Using default configuration.");
+                ClientConfigFile::default()
             },
         };
         
@@ -255,23 +284,19 @@ impl ClientConfig {
             colors:         Some(Colors::default()),
         };
         
-        if let Err(e) = confy::store("grel", cfg) {
-            return Err(format!("Error writing new configuration file: {}", e));
-        }
-        let bdirs = match BaseDirs::new() {
-            None => { return Ok(String::from("a directory that could not be determined")); },
-            Some(x) => x,
-        };
-        let mut d = std::path::PathBuf::from(bdirs.config_dir());
-        d.push("grel"); d.push("grel");
-        d.set_extension("toml");
+        let mut cfg_path = default_config_dir();
+        cfg_path.push(CLIENT_NAME);
+        let cfg_str = toml::to_string(&cfg).unwrap();
         
-        match d.to_str() {
-            None => {
-                let x = d.to_string_lossy();
-                return Ok(String::from(x.as_ref()));
+        match std::fs::write(&cfg_path, &cfg_str) {
+            Ok(()) => match cfg_path.to_str() {
+                Some(x) => { return Ok(String::from(x)); },
+                None => { return Ok(cfg_path.to_string_lossy().to_string()); }
             },
-            Some(x) => { return Ok(String::from(x)); },
+            Err(e) =>{
+                return Err(format!("Error writing new config file {}: {}",
+                                   &cfg_path.display(), &e));
+            },
         }
     }
 }
