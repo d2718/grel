@@ -110,14 +110,23 @@ any of these values will default to normal terminal coloring.
 The client's operation is _modal_ (_a la_ `vi`). Because I am more
 sympathetic than Bill Joy, the client launches in _input_ mode, where text you
 type gets added to the input line and sent to the server when you hit return.
-This is indicated by the `Ipt` in the lower-left-hand corner. In this made,
-the backspace, delete, and horizontal arrow keys act as you'd expect.
+This is indicated by the `Ipt` in the lower-left-hand corner. In this mode,
+
+  * backspace, delete, home, end, and left/right arrow keys act as you'd
+    expect
+
+  * alt-backspace and alt-delete will delete an entire word
 
 Hitting escape (or backspace when the input line is empty) will put you in
 _command_ mode (indicated by `Com` in the lower-left-hand corner), where you
 will eventually be able to control more aspects of the client. Right now,
 
   * `q` will quit with no leave message.
+  
+  * `ctrl-q` will force-quit the client without sending any messages to the
+    server to disconnect cleanly. The server will eventually figure this out
+    when the client stops responding to `Msg::Ping`s, and log you out
+    "posthumously".
   
   * `PgUp/PgDn` will scroll the chat text up/down one screen.
   

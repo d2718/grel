@@ -1055,7 +1055,8 @@ fn process_room(
     }
     
     for uid in logouts.drain(..) {
-        if let Some(mu) = ctxt.umap.get_mut(&uid) {
+        if let Some(mut mu) = ctxt.umap.remove(&uid) {
+            let _ = ctxt.ustr.remove(mu.get_idstr());
             let msg = Msg::logout("Too long since the server received data from the client.");
             mu.deliver_msg(&msg);
             let env = Env::new(
