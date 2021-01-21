@@ -7,7 +7,7 @@ updated 2021-01-11
 */
 
 use lazy_static::lazy_static;
-use log::{error, debug};
+use log::{error, debug, trace};
 use std::io::stdout;
 use std::net::TcpStream;
 use std::time::{Instant};
@@ -56,6 +56,18 @@ struct Globals {
     server_addr: String,
     socket: Sock,
     cmd: char,
+    run: bool,
+}
+
+impl Globals {
+    pub fn enqueue(&mut self, m: &Msg) {
+        let b = m.bytes();
+        self.socket.enqueue(&b);
+    }
+    
+    pub fn enqueue_bytes(&mut self, b: &[u8]) {
+        self.socket.enqueue(b);
+    }
 }
 
 /** Read command line options and configuration file. */
@@ -221,10 +233,7 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
             match cmd.as_str() {
                 "quit" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => {
-                            let b = Msg::Logout(arg).bytes();
-                            gv.socket.enqueue(&b);
-                        },
+                        Ok((_, arg)) => { gv.enqueue(&Msg::Logout(arg)); },
                         Err(_) => { return; },
                     }
                 },
@@ -232,8 +241,10 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 "priv" => {
                     match split_command_toks(&cmd_toks, 2) {
                         Ok((cmds, arg)) => {
-                            let b = Msg::Priv { who: cmds[1].to_string(), text: arg, }.bytes();
-                            gv.socket.enqueue(&b);
+                            gv.enqueue(&Msg::Priv {
+                                who: cmds[1].to_string(),
+                                text: arg,
+                            });
                         },
                         Err(_) => {
                             let mut sl = Line::new();
@@ -245,20 +256,14 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 
                 "name" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => {
-                            let b = Msg::Name(arg).bytes();
-                            gv.socket.enqueue(&b);
-                        },
+                        Ok((_, arg)) => { gv.enqueue(&Msg::Name(arg)); },
                         Err(_) => { return; },
                     }
                 },
                 
                 "join" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => {
-                            let b = Msg::Join(arg).bytes();
-                            gv.socket.enqueue(&b);
-                        },
+                        Ok((_, arg)) => { gv.enqueue(&Msg::Join(arg)); },
                         Err(_) => { return; },
                     }
                 },
@@ -266,8 +271,10 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 "who" | "rooms" => {
                     match split_command_toks(&cmd_toks, 1) {
                         Ok((_, arg)) => {
-                            let b = Msg::Query{ what: cmd.clone(), arg: arg, }.bytes();
-                            gv.socket.enqueue(&b);
+                            gv.enqueue(&Msg::Query{
+                                what: cmd.clone(),
+                                arg: arg,
+                            });
                         },
                         Err(_) => { return; }
                     }
@@ -275,20 +282,14 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 
                 "block" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => {
-                            let b = Msg::Block(arg).bytes();
-                            gv.socket.enqueue(&b);
-                        },
+                        Ok((_, arg)) => { gv.enqueue(&Msg::Block(arg)); },
                         Err(_) => { return; },
                     }
                 },
                 
                 "unblock" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => {
-                            let b = Msg::Unblock(arg).bytes();
-                            gv.socket.enqueue(&b);
-                        },
+                        Ok((_, arg)) => { gv.enqueue(&Msg::Unblock(arg)); },
                         Err(_) => { return; },
                     }
                 },
@@ -314,9 +315,7 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                                     None
                                 }
                             };
-                            if let Some(m) = msg {
-                                gv.socket.enqueue(&m.bytes());
-                            }
+                            if let Some(m) = msg { gv.enqueue(&m); }
                         },
                     }
                 },
@@ -343,11 +342,10 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
         }
     }
     lines.push(cur_line);
-    let b = Msg::Text {
+    gv.enqueue(&Msg::Text {
         who: String::new(),
         lines: lines,
-    }.bytes();
-    gv.socket.enqueue(&b);
+    });
 }
 
 /** Respond to keypress events in _command_ mode. */
@@ -367,10 +365,14 @@ fn command_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
             scrn.scroll_lines(jump);
         },
         KeyCode::Char('q') => {
-            let m = Msg::logout("quit...");
-            gv.socket.enqueue(&m.bytes());
+            if evt.modifiers.contains(event::KeyModifiers::CONTROL) {
+                gv.messages.push("Force quit the client.".to_string());
+                gv.run = false;
+            } else {
+                gv.enqueue(&Msg::logout("[ client quit  ]"));
+            }
         },
-        _ => { debug!("command_key(...): {:?} ignored", evt); },
+        _ => { /* */ },
     }
 }
 
@@ -384,13 +386,29 @@ fn input_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
         KeyCode::Backspace => {
             if scrn.get_input_length() == 0 {
                 gv.mode = Mode::Command;
+            } else if evt.modifiers.contains(event::KeyModifiers::ALT) {
+                scrn.input_backspace_word();
             } else {
                 scrn.input_backspace();
             }
         },
-        KeyCode::Delete => { scrn.input_delete(); },
+        KeyCode::Delete => { 
+            if evt.modifiers.contains(event::KeyModifiers::ALT) {
+                scrn.input_delete_word();
+            } else {
+                scrn.input_delete();
+            }
+        },
         KeyCode::Left   => { scrn.input_skip_chars(-1); },
         KeyCode::Right  => { scrn.input_skip_chars(1);  },
+        KeyCode::Home => {
+            let delta = scrn.get_input_length() as i16;
+            scrn.input_skip_chars(-delta);
+        },
+        KeyCode::End => {
+            let delta = scrn.get_input_length() as i16;
+            scrn.input_skip_chars(delta);
+        },
         KeyCode::Esc    => { gv.mode = Mode::Command; },
         KeyCode::Char('\u{1b}') => {
             if evt.modifiers.contains(event::KeyModifiers::ALT) {
@@ -398,7 +416,7 @@ fn input_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
             }
         },
         KeyCode::Char(c) => { scrn.input_char(c); },
-        _ => { debug!("input_key(...): {:?} ignored", &evt); }
+        _ => { /* */ }
     }
 }
 
@@ -419,6 +437,7 @@ fn process_user_typing(
         
         match event::read()? {
             Event::Key(evt) => {
+                trace!("event: {:?}", evt);
                 match gv.mode {
                     Mode::Command => command_key(evt, scrn, gv),
                     Mode::Input   => input_key(evt, scrn, gv),
@@ -442,7 +461,7 @@ Returns true if the program should quit.
 fn process_msg(m: Msg,
                scrn: &mut Screen,
                gv: &mut Globals)
--> Result<bool, String> {
+-> Result<(), String> {
     debug!("process_msg(...): rec'd: {:?}", &m);
     match m {
         Msg::Ping => { gv.socket.enqueue(&PING); },
@@ -468,7 +487,7 @@ fn process_msg(m: Msg,
         
         Msg::Logout(s) => {
             gv.messages.push(s);
-            return Ok(true);
+            gv.run = false;
         },
         
         Msg::Info(s) => {
@@ -616,7 +635,7 @@ fn process_msg(m: Msg,
             scrn.push_line(sl);
         },
     }
-    return Ok(false);
+    return Ok(());
 }
 
 /** When the mode line (in the lower-left-hand corner) should change,
@@ -678,6 +697,7 @@ fn main() {
         server_addr: sck.get_addr().unwrap(),
         socket: sck,
         cmd: cfg.cmd_char,
+        run: true,
     };
     
     {
@@ -723,6 +743,8 @@ fn main() {
                         if let Err(e) = scrn.refresh(&mut term) {
                             gv.messages.push(format!("Error refreshing screen: {}", e));
                             break 'main_loop;
+                        } else if gv.run == false {
+                            break 'main_loop;
                         }
                     },
                     Ok(false) => { break 'input_loop; },
@@ -766,8 +788,11 @@ fn main() {
                             Ok(None) => { break 'msg_loop; },
                             Ok(Some(msg)) => {
                                 match process_msg(msg, &mut scrn, &mut gv) {
-                                    Ok(true) => { break 'main_loop; },
-                                    Ok(false) => {},
+                                    Ok(()) => { 
+                                        if gv.run == false {
+                                            break 'main_loop;
+                                        }
+                                    },
                                     Err(e) => {
                                         error!("process_msg(...) returned error: {}", e);
                                     },

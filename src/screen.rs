@@ -6,7 +6,7 @@ This new version uses the
 [`crossterm`](https://github.com/crossterm-rs/crossterm)
 library instead of `termion`.
 
-2021-01-08
+2021-01-21
 */
 
 use lazy_static::lazy_static;
@@ -142,6 +142,7 @@ impl Screen {
         let (x, y): (u16, u16) = terminal::size()?;
         term.queue(cursor::Hide)?
             .queue(terminal::DisableLineWrap)?;
+        term.queue(terminal::SetTitle("grel Terminal Client"))?;
         term.flush()?;
         
         let stylez = Styles::default();
@@ -310,6 +311,31 @@ impl Screen {
             }
         }
         self.input_dirty = true;
+    }
+    
+    pub fn input_backspace_word(&mut self) {
+        if self.input_ip == 0 { return; }
+        while self.input_ip > 0 &&
+              self.input[self.input_ip as usize - 1].is_whitespace() {
+                  self.input_backspace();
+        }
+        while self.input_ip > 0 &&
+              !self.input[self.input_ip as usize - 1].is_whitespace() {
+                  self.input_backspace();
+        }
+    }
+    
+    pub fn input_delete_word(&mut self) {
+        let uip = self.input_ip as usize;
+        if uip == self.input.len() { return; }
+        while uip < self.input.len() &&
+              self.input[uip].is_whitespace() {
+                  self.input_delete();
+        }
+        while uip < self.input.len() &&
+              !self.input[uip].is_whitespace() {
+                self.input_delete();
+        }
     }
     
     /** Scroll the main display up (or down, for negative values) `n_chars`,
@@ -486,8 +512,8 @@ impl Screen {
             }
         };
         
-        trace!("Screen::refresh_input(): (startpos, endpos) = ({}, {})",
-                startpos, endpos);
+        //~ trace!("Screen::refresh_input(): (startpos, endpos) = ({}, {})",
+                //~ startpos, endpos);
         
         let input_ip_us = self.input_ip as usize;
         for i in (startpos as usize)..(endpos as usize) {
@@ -641,7 +667,8 @@ impl Drop for Screen {
         let mut term = std::io::stdout();
         term.queue(cursor::Show).unwrap()
             .queue(terminal::EnableLineWrap).unwrap()
-            .queue(terminal::Clear(terminal::ClearType::All)).unwrap();
+            .queue(terminal::Clear(terminal::ClearType::All)).unwrap()
+            .queue(cursor::MoveTo(0,0)).unwrap();
         term.flush().unwrap();
         terminal::disable_raw_mode().unwrap();
     }
