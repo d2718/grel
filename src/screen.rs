@@ -313,6 +313,9 @@ impl Screen {
         self.input_dirty = true;
     }
     
+    /* Delete from the input cursor backward to the next chunk of whitespace
+    (or the beginning of the input, if that's encountered first.)
+    */
     pub fn input_backspace_word(&mut self) {
         if self.input_ip == 0 { return; }
         while self.input_ip > 0 &&
@@ -325,6 +328,9 @@ impl Screen {
         }
     }
     
+    /* Delete from the input cursor forward to the next chunk of whitespace
+    (or the end of the input, if that's encountered first.)
+    */
     pub fn input_delete_word(&mut self) {
         let uip = self.input_ip as usize;
         if uip == self.input.len() { return; }
@@ -336,6 +342,52 @@ impl Screen {
               !self.input[uip].is_whitespace() {
                 self.input_delete();
         }
+    }
+    
+    /* Move the input cursor forward to the next word-end location. */
+    pub fn input_skip_foreword(&mut self) {
+        let uip = self.input_ip as usize;
+        if uip == self.input.len() { return; }
+        
+        self.input_dirty = true;
+        let mut in_ws = self.input[uip].is_whitespace();
+        
+        for (i, c) in self.input[uip..].iter().enumerate() {
+            if in_ws {
+                if !c.is_whitespace() { in_ws = false; }
+            } else {
+                if c.is_whitespace() {
+                    self.input_ip = (uip + i) as u16;
+                    return;
+                }
+            }
+        }
+        self.input_ip = self.input.len() as u16;
+    }
+    
+    /* Move the input cursor backward to the previous word-beginning
+    location. */
+    pub fn input_skip_backword(&mut self) {
+        let uip = self.input_ip as usize;
+        if uip == 0 { return; }
+        
+        self.input_dirty = true;
+        let mut in_ws = false;
+        if uip < self.input.len() {
+            if self.input[uip-1].is_whitespace() { in_ws = true; }
+        }
+        
+        for (i, c) in self.input[..uip].iter().rev().enumerate() {
+            if in_ws {
+                if !c.is_whitespace() { in_ws = false; }
+            } else {
+                if c.is_whitespace() {
+                    self.input_ip = (uip - i) as u16;
+                    return;
+                }
+            }
+        }
+        self.input_ip = 0;
     }
     
     /** Scroll the main display up (or down, for negative values) `n_chars`,
