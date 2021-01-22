@@ -112,10 +112,12 @@ sympathetic than Bill Joy, the client launches in _input_ mode, where text you
 type gets added to the input line and sent to the server when you hit return.
 This is indicated by the `Ipt` in the lower-left-hand corner. In this mode,
 
-  * backspace, delete, home, end, and left/right arrow keys act as you'd
-    expect
+  * `Backspace`, `Delete`, `Home`, `End`, and `Left`/`Right` (arrow keys)
+    act as you'd expect
 
-  * alt-backspace and alt-delete will delete an entire word
+  * `alt-Backspace` and `alt-Delete` will delete an entire word
+  
+  * `alt-Left` and `alt-Right` will move the cursor position by one word
 
 Hitting escape (or backspace when the input line is empty) will put you in
 _command_ mode (indicated by `Com` in the lower-left-hand corner), where you

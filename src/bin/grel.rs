@@ -399,8 +399,20 @@ fn input_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
                 scrn.input_delete();
             }
         },
-        KeyCode::Left   => { scrn.input_skip_chars(-1); },
-        KeyCode::Right  => { scrn.input_skip_chars(1);  },
+        KeyCode::Left   => { 
+            if evt.modifiers.contains(event::KeyModifiers::ALT) {
+                scrn.input_skip_backword();
+            } else {
+                scrn.input_skip_chars(-1);
+            }
+        },
+        KeyCode::Right  => {
+            if evt.modifiers.contains(event::KeyModifiers::ALT) {
+                scrn.input_skip_foreword();
+            } else {
+                scrn.input_skip_chars(1);
+            }
+        },
         KeyCode::Home => {
             let delta = scrn.get_input_length() as i16;
             scrn.input_skip_chars(-delta);
