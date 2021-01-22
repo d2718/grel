@@ -1,10 +1,11 @@
 # cargo-built executables and documentation
 /target
 
-# any log files
+# any log or testing conf files
 *.log
 */*.log
 *.run
+*.conf
 
 # server pidfile
 d.pid

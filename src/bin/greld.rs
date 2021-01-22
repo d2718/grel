@@ -979,7 +979,7 @@ fn process_room(
     };
     
     let mut envz: Vec<Env> = Vec::new();
-    let mut logouts: Vec<u64> = Vec::new();
+    let mut logouts: Vec<(u64, &str)> = Vec::new();
     
     for uid in &uid_list {
         let m: Msg;
@@ -1004,7 +1004,7 @@ fn process_room(
                     let last = mu.get_last_data_time();
                     match current_time.checked_duration_since(last) {
                         Some(x) if x > cfg.blackout_time_to_kick => {
-                            logouts.push(*uid);
+                            logouts.push((*uid, "Too long since server received data from the client."));
                         },
                         Some(x) if x > cfg.blackout_time_to_ping => {
                             mu.deliver_msg(&Msg::Ping);
@@ -1024,6 +1024,12 @@ fn process_room(
                         continue;
                     }
                 }
+            }
+            
+            if mu.has_errors() {
+                let e = mu.get_errors();
+                warn!("User {} being logged out for error(s): {}", uid, &e);
+                logouts.push((*uid, "Communication error."));
             }
         }
         
@@ -1054,10 +1060,10 @@ fn process_room(
         }
     }
     
-    for uid in logouts.drain(..) {
+    for (uid, errmsg) in logouts.iter() {
         if let Some(mut mu) = ctxt.umap.remove(&uid) {
             let _ = ctxt.ustr.remove(mu.get_idstr());
-            let msg = Msg::logout("Too long since the server received data from the client.");
+            let msg = Msg::logout(errmsg);
             mu.deliver_msg(&msg);
             let env = Env::new(
                 Endpoint::Server,
@@ -1096,6 +1102,7 @@ fn process_room(
     
     {
         let r = ctxt.rmap.get_mut(&rid).unwrap();
+        for (uid, _) in logouts.drain(..) { r.leave(uid); }
         r.deliver_inbox(ctxt.umap);
         for env in &envz {
             r.deliver(env, ctxt.umap);
