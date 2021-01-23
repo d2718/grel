@@ -3,7 +3,7 @@ user.rs
 
 The `User` struct--representing a connected client--and related methods.
 
-updated: 2020-12-28
+updated: 2020-01-23
 
 */
 
@@ -71,6 +71,7 @@ pub struct User {
     idn: u64,
     idstr: String,
     bytes_sucked: usize,
+    quota_bytes: usize,
     last_data_time: Instant,
     errs: Vec<SockError>,
     blocks: Vec<u64>,
@@ -85,6 +86,7 @@ impl User {
             idstr: ascollapse(&new_name),
             name: new_name,
             bytes_sucked: 0,
+            quota_bytes: 0,
             last_data_time: Instant::now(),
             errs: Vec::<SockError>::new(),
             blocks: Vec::<u64>::new(),
@@ -109,23 +111,23 @@ impl User {
         self.idstr = ascollapse(new_name);
     }
     
-    /** To implement throttling, the `User` increments an internal counter
-    whenever bytes are read from the underlying socket; this counter can
-    then be lowered over time.
+    /** To implement throttling, the `User` increments and internal byte
+    counter whenever certain types of `Msg`s are decoded from the underlying
+    socket; this count can be lowered over time.
     
     This method returns the value of that internal counter.
     */
-    pub fn get_byte_quota(&self) -> usize { self.bytes_sucked }
+    pub fn get_byte_quota(&self) -> usize { self.quota_bytes }
     
-    /** To implement throttling, the `User` increments and internal counter
-    whenever bytes are read from the underlying socket; this method can be
-    used to lower that internal counter.
+    /** To implement throttling, the `User` increments and internal byte
+    counter whenever certain types of `Msg`s are decoded from the underlying
+    socket; this method can be used to lower that internal counter.
     */
     pub fn drain_byte_quota(&mut self, amount: usize) {
-        if amount > self.bytes_sucked {
-            self.bytes_sucked = 0;
+        if amount > self.quota_bytes {
+            self.quota_bytes = 0;
         } else {
-            self.bytes_sucked = self.bytes_sucked - amount;
+            self.quota_bytes -= amount;
         }
     }
     
@@ -257,7 +259,8 @@ impl User {
             Ok(n) => { self.bytes_sucked = self.bytes_sucked + n; },
         }
         
-        if self.thesock.recv_buff_size() > 0 {
+        let n_buff = self.thesock.recv_buff_size();
+        if n_buff > 0 {
             match self.thesock.try_get() {
                 Err(e) => {
                     self.errs.push(e);
@@ -265,6 +268,12 @@ impl User {
                 },
                 Ok(msg_opt) => {
                     self.last_data_time = Instant::now();
+                    // If it's a noisy message, increment byte quota.
+                    if let Some(ref m) = msg_opt {
+                        if m.counts() {
+                            self.quota_bytes += n_buff - self.thesock.recv_buff_size();
+                        }
+                    }
                     return msg_opt;
                 },
             }
