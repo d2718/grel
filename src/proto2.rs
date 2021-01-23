@@ -4,7 +4,7 @@ proto2.rs
 A newer, simpler, more easily-extensible `grel` protocol. As of 2020-12-29,
 this supersedes the `grel::protocol` lib.
 
-2020-101-14
+2020-01-23
 */
 
 use serde::{Serialize, Deserialize};
@@ -213,6 +213,19 @@ impl Msg {
     /// Return a JSON-encoded version of a `Msg`.
     pub fn bytes(&self) -> Vec<u8> {
         serde_json::to_vec_pretty(&self).unwrap()
+    }
+    
+    /** Return whether a Msg should count against a user's "byte quota"
+    (for rate limiting). Generally, this is anything that causes "noise".
+    */
+    pub fn counts(&self) -> bool {
+        match self {
+            Msg::Text { who: _, lines: _ } => true,
+            Msg::Priv { who: _, text:  _ } => true,
+            Msg::Name(_) => true,
+            Msg::Join(_) => true,
+            _ => false,
+        }
     }
 }
 

@@ -184,6 +184,11 @@ available:
   * `;op give somebody` will transfer the mantleship of operator to user
     `somebody`.
 
+### A note about user and room names
+
+Names are allowed to contain any arbitrary unicode characters, including
+whitespace (although they cannot be made of _only_ whitespace).
+
 ### Server Instructions
 
 The server configuration on my machine is at `~/.config/greld/greld.toml`;
