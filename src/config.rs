@@ -8,7 +8,7 @@ The `grel` configuration structs and mechanism.
 to (try to) determine an appropriate location for configuration files.
 If it can't, it will look to load (or generate) one in the current directory.
 
-2021-01-19
+2021-01-24
 */
 use std::time::Duration;
 use std::path::{Path, PathBuf};
@@ -18,21 +18,24 @@ use simplelog::LevelFilter;
 const CLIENT_NAME: &str = "grel.toml";
 const SERVER_NAME: &str = "greld.toml";
 
-const ADDR:           &str = "127.0.0.1:51516";
-const SERVER_LOG:     &str = "greld.log";
-const NAME:           &str = "grel user";
-const LOBBY_NAME:     &str = "Lobby";
-const WELCOME:        &str = "Welcome to a grel server.";
-const SERVER_TICK:     u64 = 100;
-const BYTE_LIMIT:    usize = 512;
-const BYTE_TICK:     usize = 6;
-const CLIENT_TICK:     u64 = 100;
-const BLOCK_TIMEOUT:   u64 = 5000;
-const READ_SIZE:     usize = 1024;
-const ROSTER_WIDTH:    u16 = 24;
-const CMD_CHAR:       char = ';';
-const MIN_SCROLLBACK: usize = 1000;
-const MAX_SCROLLBACK: usize = 2000;
+const ADDR:             &str = "127.0.0.1:51516";
+const SERVER_LOG:       &str = "greld.log";
+const NAME:             &str = "grel user";
+const LOBBY_NAME:       &str = "Lobby";
+const WELCOME:          &str = "Welcome to a grel server.";
+const SERVER_TICK:       u64 = 500;
+const BYTE_LIMIT:      usize = 512;
+const BYTE_TICK:       usize = 6;
+const LOG_LEVEL: LevelFilter = LevelFilter::Warn;
+const BLACKOUT_TO_PING:  u64 = 10000;
+const BLACKOUT_TO_KICK:  u64 = 20000;
+const CLIENT_TICK:       u64 = 100;
+const BLOCK_TIMEOUT:     u64 = 5000;
+const READ_SIZE:       usize = 1024;
+const ROSTER_WIDTH:      u16 = 24;    // Also server max user name and max room name lengths
+const CMD_CHAR:         char = ';';
+const MIN_SCROLLBACK:  usize = 1000;
+const MAX_SCROLLBACK:  usize = 2000;
 
 fn default_config_dir() -> PathBuf {
     match directories::BaseDirs::new() {
@@ -48,18 +51,18 @@ struct (see below) for the program to actually use.
 */
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ServerConfigFile {
-    address: String,
-    tick_ms: u64,
-    blackout_to_ping_ms: u64,
-    blackout_to_kick_ms: u64,
-    max_user_name_length: usize,
-    max_room_name_length: usize,
-    lobby_name: String,
-    welcome: String,
-    log_file: String,
-    log_level: u8,
-    byte_limit: usize,
-    bytes_per_tick: usize,
+    address:              Option<String>,
+    tick_ms:              Option<u64>,
+    blackout_to_ping_ms:  Option<u64>,
+    blackout_to_kick_ms:  Option<u64>,
+    max_user_name_length: Option<usize>,
+    max_room_name_length: Option<usize>,
+    lobby_name:           Option<String>,
+    welcome:              Option<String>,
+    log_file:             Option<String>,
+    log_level:            Option<u8>,
+    byte_limit:           Option<usize>,
+    bytes_per_tick:       Option<usize>,
 }
 
 /** `GrelConfigFile` implements `Default` because this is the mechanism
@@ -69,18 +72,18 @@ missing from the configuration file.
 impl std::default::Default for ServerConfigFile {
     fn default() -> Self {
         Self {
-            address: String::from(ADDR),
-            tick_ms: SERVER_TICK,
-            blackout_to_ping_ms: 5000,
-            blackout_to_kick_ms: 10000,
-            max_user_name_length: 24,
-            max_room_name_length: 24,
-            lobby_name: String::from(LOBBY_NAME),
-            welcome: String::from(WELCOME),
-            log_file: String::from(SERVER_LOG),
-            log_level: 5,
-            byte_limit: BYTE_LIMIT,
-            bytes_per_tick: BYTE_TICK,
+            address:              None, //String::from(ADDR),
+            tick_ms:              None, //SERVER_TICK,
+            blackout_to_ping_ms:  None, //5000,
+            blackout_to_kick_ms:  None, //10000,
+            max_user_name_length: None, //24,
+            max_room_name_length: None, //24,
+            lobby_name:           None, //String::from(LOBBY_NAME),
+            welcome:              None, //String::from(WELCOME),
+            log_file:             None, //String::from(SERVER_LOG),
+            log_level:            None, //5,
+            byte_limit:           None, //BYTE_LIMIT,
+            bytes_per_tick:       None, //BYTE_TICK,
         }
     }
 }
@@ -132,31 +135,36 @@ impl ServerConfig {
         };
         
         let logl: LevelFilter = match cfgf.log_level {
-            0 => LevelFilter::Off,
-            1 => LevelFilter::Error,
-            2 => LevelFilter::Warn,
-            3 => LevelFilter::Info,
-            4 => LevelFilter::Debug,
-            5 => LevelFilter::Trace,
-            _ => {
+            None    => LOG_LEVEL,
+            Some(0) => LevelFilter::Off,
+            Some(1) => LevelFilter::Error,
+            Some(2) => LevelFilter::Warn,
+            Some(3) => LevelFilter::Info,
+            Some(4) => LevelFilter::Debug,
+            Some(5) => LevelFilter::Trace,
+            Some(_) => {
                 println!("Log levels higher than 5 not supported; setting to 5.");
                 LevelFilter::Trace
             },
         };
         
         ServerConfig {
-            address: cfgf.address,
-            min_tick: Duration::from_millis(cfgf.tick_ms),
-            blackout_time_to_ping: Duration::from_millis(cfgf.blackout_to_ping_ms),
-            blackout_time_to_kick: Duration::from_millis(cfgf.blackout_to_kick_ms),
-            max_user_name_length:  cfgf.max_user_name_length,
-            max_room_name_length:  cfgf.max_room_name_length,
-            lobby_name: cfgf.lobby_name,
-            welcome: cfgf.welcome,
-            log_file: cfgf.log_file,
-            log_level: logl,
-            byte_limit: cfgf. byte_limit,
-            byte_tick: cfgf.bytes_per_tick,
+            address:  cfgf.address.unwrap_or(ADDR.to_string()),
+            min_tick: Duration::from_millis(cfgf.tick_ms.unwrap_or(SERVER_TICK)),
+            blackout_time_to_ping: Duration::from_millis(cfgf.blackout_to_ping_ms
+                                    .unwrap_or(BLACKOUT_TO_PING)),
+            blackout_time_to_kick: Duration::from_millis(cfgf.blackout_to_kick_ms
+                                    .unwrap_or(BLACKOUT_TO_KICK)),
+            max_user_name_length:  cfgf.max_user_name_length
+                                    .unwrap_or(ROSTER_WIDTH as usize),
+            max_room_name_length:  cfgf.max_room_name_length
+                                    .unwrap_or(ROSTER_WIDTH as usize),
+            lobby_name: cfgf.lobby_name.unwrap_or(LOBBY_NAME.to_string()),
+            welcome:    cfgf.welcome   .unwrap_or(WELCOME.to_string()),
+            log_file:   cfgf.log_file  .unwrap_or(SERVER_LOG.to_string()),
+            log_level:  logl,
+            byte_limit: cfgf.byte_limit.unwrap_or(BYTE_LIMIT),
+            byte_tick:  cfgf.bytes_per_tick.unwrap_or(BYTE_TICK),
         }
     }
 }
