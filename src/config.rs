@@ -124,27 +124,32 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
-    /** This single method reads a configuration file (probe `confy` for
-    the details of exactly where it looks for files to read) and populates
-    and returns a `ServerConfig` struct.
+    /** This single method attempts to read a configuration file first
+    from `./greld.toml` and then from
+    `your_system's_standard_config_directory/greld.toml`
+    and return a `ServerConfig` object.
+    
+    Execution will fail with a message upon error.
     */
     pub fn configure() -> ServerConfig {
+        let mut pathz: Vec<PathBuf> = Vec::new();
+        pathz.push(PathBuf::from(SERVER_NAME));
+        {
+            let mut p = default_config_dir();
+            p.push(SERVER_NAME);
+            pathz.push(p);
+        }
         
-        let mut cfg_path = default_config_dir();
-        cfg_path.push(SERVER_NAME);
-        
-        let cfgf: ServerConfigFile = match std::fs::read_to_string(&cfg_path) {
+        let cfgf: ServerConfigFile = match read_first_to_string(&pathz) {
             Ok(s) => match toml::from_str(&s) {
                 Ok(x) => x,
                 Err(e) => {
-                    println!("Error parsing config file {}: {}",
-                             &cfg_path.display(), &e);
+                    println!("Error parsing config file: {}", &e);
                     std::process::exit(1);
                 },
             },
             Err(e) => {
-                println!("Error reading config file {}: {}",
-                         &cfg_path.display(), &e);
+                println!("Error reading config file: {}", &e);
                 println!("Using default configuration.");
                 ServerConfigFile::default()
             },
