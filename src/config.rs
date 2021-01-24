@@ -11,7 +11,8 @@ If it can't, it will look to load (or generate) one in the current directory.
 2021-01-24
 */
 use std::time::Duration;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::fmt::Write;
 
 use simplelog::LevelFilter;
 
@@ -37,11 +38,26 @@ const CMD_CHAR:         char = ';';
 const MIN_SCROLLBACK:  usize = 1000;
 const MAX_SCROLLBACK:  usize = 2000;
 
+/** Generate a platform-appropriate path for configuration files. */
 fn default_config_dir() -> PathBuf {
     match directories::BaseDirs::new() {
         None => PathBuf::new(),
         Some(d) => d.config_dir().to_path_buf(),
     }
+}
+
+/** Attempt to read from a series of files, returning the contents of the
+first successful attempt.
+*/
+fn read_first_to_string(ps: &[PathBuf]) -> Result<String, String> {
+    let mut misses = String::from("Couldn't read from");
+    for p in ps.iter() {
+        match std::fs::read_to_string(p) {
+            Ok(s) => { return Ok(s); },
+            Err(e) => { write!(&mut misses, "\n\"{}\" ({})", p.display(), e).unwrap(); },
+        }
+    }
+    Err(misses)
 }
 
 /** The `GrelConfigFile` deserializes from a `.toml` file to a struct
@@ -239,17 +255,28 @@ pub struct ClientConfig {
 }
 
 impl ClientConfig {
+    /** Generate a configuration for the client.
+    
+    Will attempt to read from config files in the following order:
+    
+      * supplied as a function argument
+      * `grel.toml` in the current directory
+      * `grel.toml` in the directory returned by `default_config_dir()`
+    
+    If none of those succeed, will generate a default configuration
+    (which is pretty useless, but is still a configuration).
+    */
     pub fn configure(path: Option<&str>) -> Result<ClientConfig, String> {
-        let cfg_path = match path {
-            Some(s) => Path::new(&s).to_path_buf(),
-            None => {
-                let mut p = default_config_dir().to_path_buf();
-                p.push(CLIENT_NAME);
-                p
-            },
-        };
+        let mut pathz: Vec<PathBuf> = Vec::new();
+        if let Some(p) = path { pathz.push(PathBuf::from(&p)); }
+        pathz.push(PathBuf::from(CLIENT_NAME));
+       {
+           let mut p = default_config_dir().to_path_buf();
+            p.push(CLIENT_NAME);
+            pathz.push(p);
+        }
         
-        let f: ClientConfigFile = match std::fs::read_to_string(&cfg_path) {
+        let f: ClientConfigFile = match read_first_to_string(&pathz) {
             Ok(s) => match toml::from_str(&s) {
                 Ok(x) => x,
                 Err(e) => { return Err(format!("Error parsing config file: {}", &e)); },
@@ -288,6 +315,9 @@ impl ClientConfig {
         return Ok(cc);
     }
     
+    /** Generate a default config file in the default location, and return
+    that location as a string (so it can be displayed to the user).
+    */
     pub fn generate() -> Result<String, String> {
         let cfg = ClientConfigFile {
             address:        Some(String::from(ADDR)),
