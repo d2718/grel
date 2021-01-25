@@ -539,7 +539,7 @@ fn process_msg(m: Msg,
                 }
                 sl.pushf(room, &scrn.styles().high);
                 sl.push(".");
-                gv.socket.enqueue(&ROSTER_REQUEST);
+                gv.enqueue_bytes(&ROSTER_REQUEST);
                 scrn.push_line(sl);
             },
             
@@ -553,7 +553,7 @@ fn process_msg(m: Msg,
                 sl.pushf(name, &scrn.styles().high);
                 sl.push(" leaves: ");
                 sl.push(message);
-                gv.socket.enqueue(&ROSTER_REQUEST);
+                gv.enqueue_bytes(&ROSTER_REQUEST);
                 scrn.push_line(sl);
             },
             
@@ -592,8 +592,29 @@ fn process_msg(m: Msg,
                 sl.pushf(new, &scrn.styles().high);
                 sl.push(".");
                 scrn.push_line(sl);
-                gv.socket.enqueue(&ROSTER_REQUEST);
+                gv.enqueue_bytes(&ROSTER_REQUEST);
             },
+            
+            "new_op" => {
+                let (name, room) = match &data[..] {
+                    [x, y] => (x, y),
+                    _ => { return Err(format!("Incomplete data: {:?}", &m)); },
+                };
+                
+                let mut sl = Line::new();
+                sl.push("* ");
+                if name == &gv.uname {
+                    sl.pushf("You", &scrn.styles().bold);
+                    sl.push(" are now the operator of ");
+                } else {
+                    sl.pushf(name, &scrn.styles().high);
+                    sl.push(" is now the operator of ");
+                }
+                sl.pushf(room, &scrn.styles().bold);
+                sl.push(".");
+                scrn.push_line(sl);
+                gv.enqueue_bytes(&ROSTER_REQUEST);
+            }
             
             "roster" => {
                 if data.len() < 1 { return Err(format!("Incomplete data: {:?}", &m)); }
@@ -612,7 +633,21 @@ fn process_msg(m: Msg,
                 sl.pushf(room, &scrn.styles().high);
                 sl.push(".");
                 scrn.push_line(sl);
-                gv.socket.enqueue(&ROSTER_REQUEST);
+                gv.enqueue_bytes(&ROSTER_REQUEST);
+            },
+
+            "kick_you" => {
+                let room = match &data[..] {
+                    [x] => x,
+                    _ => { return Err(format!("Incomplete data: {:?}", &m)); },
+                };
+                let mut sl = Line::new();
+                sl.push("* ");
+                sl.pushf("You", &scrn.styles().bold);
+                sl.push(" have been kicked from ");
+                sl.pushf(room, &scrn.styles().high);
+                sl.push(".");
+                scrn.push_line(sl);
             },
             
             "addr" => {
