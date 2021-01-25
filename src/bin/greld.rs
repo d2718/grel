@@ -735,8 +735,13 @@ fn do_op(ctxt: &mut Context, op: Op)
             cur_r.set_op(ouid);
             let env = Env::new(
                 Endpoint::Server,
-                Endpoint::Room(ctxt.rid),
-                &Msg::Info(format!("The room operator is now {}.", &ou_name)));
+                Endpoint::Room(rid),
+                //&Msg::Info(format!("The room operator is now {}.", &ou_name)));
+                &Msg::Misc {
+                    what: "new_op".to_string(),
+                    alt: format!("{} is now the operator of {}.", &ou_name, cur_r.get_name()),
+                    data: vec![ou_name, cur_r.get_name().to_string()],
+                });
             return Ok(vec![env]);
         },
 
@@ -899,7 +904,12 @@ fn do_op(ctxt: &mut Context, op: Op)
                     It requires careful dancing around &mut lifetimes.
                     */
                     
-                    let to_kicked = Msg::Info(format!("You have been kicked from {}.", cur_r.get_name()));
+                    //let to_kicked = Msg::Info(format!("You have been kicked from {}.", cur_r.get_name()));
+                    let to_kicked = Msg::Misc {
+                        what: "kick_you".to_string(),
+                        alt: format!("You have been kicked from {}.", cur_r.get_name()),
+                        data: vec![cur_r.get_name().to_string()],
+                    };
                     ku.deliver_msg(&to_kicked);                    
                     cur_r.leave(ouid);
             

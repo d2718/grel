@@ -161,7 +161,14 @@ pub enum Msg {
         what: "kick_other".to_string(),
         data: vec!["Bad User".to_string(),
                    "This Room".to_string()],
-        alt: "Bad User has been kicked from This Room.",
+        alt: "Bad User has been kicked from This Room.".to_string(),
+    };
+
+    // When YOU are kicked from the current channel.
+    Misc {
+        what: "kick_you".to_string(),
+        data: vec!["This Room".to_string()],
+        alt: "You have been kicked from This Room.".to_string(),
     };
     
     // when a user changes his or her name
@@ -170,6 +177,14 @@ pub enum Msg {
         data: vec!["old name".to_string(),
                    "new name".to_string()],
         alt: "\"old name\" is now known as \"new name\".".to_string(),
+    };
+    
+    // when the Room operator changes
+    Misc {
+        what: "new_op".to_string(),
+        data: ["New Operator".to_string(),
+               "This Room".to_string()],
+        alt: "New Operator is now the operator of This Room".to_string(),
     };
     
     // in response to a Query { what: "addr", ... }
