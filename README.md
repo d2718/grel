@@ -1,4 +1,4 @@
-# `grel`
+car# `grel`
 
 an IRC-like chat server/client in Rust
 
@@ -133,6 +133,8 @@ will eventually be able to control more aspects of the client. Right now,
   * `PgUp/PgDn` will scroll the chat text up/down one screen.
   
   * The up/down arrow keys will scroll the chat text up/down one line.
+  
+  * `alt-Up/Dn/PgUp/PgDn` will scroll the roster window.
 
 You can also type some server-interaction commands from input mode. For
 example,
@@ -267,9 +269,15 @@ and you may want to redirect `stdout` to a specific file.
     doesn't have a specialized way to display these, though; it just displays
     the `Msg::Misc.alt` response.
 
-  * A bunch of command-mode functionality needs to be implemented, like
+  * ~~A bunch of command-mode functionality needs to be implemented, like
     scrolling the various panes and resizing the roster window. (Some of this
-    is done; some isn't.)
+    is done; some isn't.)~~ This is in pretty good shape as of 2021-01-31,
+    so as I think of specific things, I'll add them to this list.
+
+  * `vi`-like search in the scrollback history
+  
+  * Input line history? Like Up/Down should scroll through input line history
+    like a lot of terminals do?
     
   * ~~The configuration of the client should involve user-customizable
     colors.~~ done 2021-01-12

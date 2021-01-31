@@ -6,7 +6,7 @@ This new version uses the
 [`crossterm`](https://github.com/crossterm-rs/crossterm)
 library instead of `termion`.
 
-2021-01-21
+2021-01-31
 */
 
 use lazy_static::lazy_static;
@@ -391,7 +391,7 @@ impl Screen {
     }
     
     /** Scroll the main display up (or down, for negative values) `n_chars`,
-    or to the end (or beginning), if the new position would be out of range.
+    or to the end (or beginning) if the new position would be out of range.
     */
     pub fn scroll_lines(&mut self, n_chars: i16) {
         let cur = self.lines_scroll as i16;
@@ -399,6 +399,30 @@ impl Screen {
         if new < 0 { new = 0; }
         self.lines_scroll = new as u16;
         self.lines_dirty = true;
+    }
+    
+    /** Scroll the roster up (or down, for negative values) `n_chars`,
+    or to the end (or beginning) if the new position would be out of range.
+    */
+    pub fn scroll_roster(&mut self, n_chars: i16) {
+        let rost_vsize = self.last_y_size - 3;
+        if rost_vsize as usize >= self.roster.len() {
+            if self.roster_scroll != 0 { self.roster_dirty = true; }
+            self.roster_scroll = 0;
+            return;
+        }
+        let max = (self.roster.len() - (rost_vsize as usize)) as i16;
+        let new = self.roster_scroll as i16 + n_chars;
+        if new < 0 {
+            if self.roster_scroll != 0 { self.roster_dirty = true; }
+            self.roster_scroll = 0;
+        } else if new > max {
+            self.roster_scroll = max as u16;
+            self.roster_dirty = true;
+        } else {
+            self.roster_scroll = new as u16;
+            self.roster_dirty = true;
+        }
     }
     
     /** Return the contents of the input line as a String and clear
@@ -517,7 +541,7 @@ impl Screen {
             l.first_n_chars(rrw).to_string()
         };
         let mut y: u16 = 1;
-        let targ_y = height - 1;
+        let targ_y = height;
         let us_scroll = self.roster_scroll as usize;
         for (i, aline) in self.roster.iter_mut().enumerate() {
             if y == targ_y { break; }
