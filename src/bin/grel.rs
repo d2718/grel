@@ -3,7 +3,7 @@ grel.rs
 
 The `grel` terminal client.
 
-updated 2021-01-11
+updated 2021-01-31
 */
 
 use lazy_static::lazy_static;
@@ -354,15 +354,39 @@ fn command_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
         KeyCode::Char(SPACE) | KeyCode::Enter => {
             gv.mode = Mode::Input;
         },
-        KeyCode::Up   => { scrn.scroll_lines(1); },
-        KeyCode::Down => { scrn.scroll_lines(-1); },
+        /* The values passed to the two scrolling functions are opposite
+        because the roster scroll is counted from the top, but the main
+        window scroll is counted from the bottom.
+        */
+        KeyCode::Up   => { 
+            if evt.modifiers.contains(event::KeyModifiers::ALT) {
+                scrn.scroll_roster(-1);
+            } else {
+                scrn.scroll_lines(1);
+            }
+        },
+        KeyCode::Down => {
+            if evt.modifiers.contains(event::KeyModifiers::ALT) {
+                scrn.scroll_roster(1);
+            } else {
+                scrn.scroll_lines(-1);
+            }
+        },
         KeyCode::PageUp => {
             let jump = (scrn.get_main_height() as i16) - 1;
-            scrn.scroll_lines(jump);
+            if evt.modifiers.contains(event::KeyModifiers::ALT) {
+                scrn.scroll_roster(-jump);
+            } else {
+                scrn.scroll_lines(jump);
+            }
         },
         KeyCode::PageDown => {
             let jump = 1 - (scrn.get_main_height() as i16);
-            scrn.scroll_lines(jump);
+            if evt.modifiers.contains(event::KeyModifiers::ALT) {
+                scrn.scroll_roster(-jump);
+            } else {
+                scrn.scroll_lines(jump);
+            }
         },
         KeyCode::Char('q') => {
             if evt.modifiers.contains(event::KeyModifiers::CONTROL) {
