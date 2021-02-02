@@ -26,8 +26,8 @@ but they do have to handle multiple different types of `Msg::Op`s and
 
 ### `String` allocations
 
-There are heap allocations everywhere that seem like they _should_ be
-avoidable. For example, a chunk of code like this:
+~~There are heap allocations everywhere that seem like they _should_ be
+avoidable. For example, a chunk of code like this:~~
 
 ```rust
   let leave_msg = Msg::Misc {
@@ -40,22 +40,30 @@ avoidable. For example, a chunk of code like this:
   envz.push(leave_env);
 ```
 
-The creation of this `Msg::Misc{}` involved copying the static `"leave"`
+~~The creation of this `Msg::Misc{}` involved copying the static `"leave"`
 into a heap-allocated `String`, cloning a user's name into another `String`,
 copying another static ( `"moved to another room"` ) into yet another
 `String`, and then formatting for the `.alt` member _also_ requires another
 heap-allocated `String`. _Then_, immediately thereafter, all of that gets
 serialized into a vector of bytes, and none of those allocations are
 needed anymore. It seems like at least _some_ of that allocation could be
-avoided.
+avoided.~~
 
-Is it possible to have my structs take an `AsRef<str>` instead of a `String`
-and still work/serialize correctly?
+~~Is it possible to have my structs take an `AsRef<str>` instead of a `String`
+and still work/serialize correctly?~~
 
-Maybe I need to have two different types of `proto2::Msg` structs that both
+~~Maybe I need to have two different types of `proto2::Msg` structs that both
 serialize to JSON identically, one that takes `&str`s and one that takes
 owned `String`s. Of course, we will only ever _de_serialize the type that
-takes owned `String`s.
+takes owned `String`s.~~
+
+UPDATE 2021-02-02: The `less_alloc` branch has replaced `proto2` with
+`proto3`, which has two types of structs: `Sndr` structs which take their
+values by reference (because they're just going to get serialiezd right
+away anyway) and `Rcvr` structs, which own their values. `Sndr`s get
+encoded in `Env`s and subsequently written to `Sock`s; `Rcvr`s get decoded
+_from_ `Sock`s. Documentation and cleanup still required, but this seems to
+work.
 
 ### Client spaghetti
 

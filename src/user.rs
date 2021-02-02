@@ -3,7 +3,7 @@ user.rs
 
 The `User` struct--representing a connected client--and related methods.
 
-updated: 2020-01-23
+updated: 2021-02-01
 
 */
 
@@ -11,7 +11,8 @@ use std::fmt::Display;
 use std::time::{Duration, Instant};
 use lazy_static::lazy_static;
 use super::sock::{Sock, SockError};
-use super::proto2::{Endpoint, Env, Msg};
+//use super::proto2::{Endpoint, Env, Msg};
+use super::proto3::{End, Env, Sndr, Rcvr};
 use super::unidata::Multichar;
 
 static TICK: Duration = Duration::from_millis(100);
@@ -151,7 +152,7 @@ impl User {
     Appropriate for both clean logouts and forced logouts due to errors.
     */
     pub fn logout(&mut self, logout_message: &str) {
-        let msg = Msg::Logout(String::from(logout_message));
+        let msg = Sndr::Logout(logout_message);
         self.deliver_msg(&msg);
         let _ = self.thesock.blow();
         let _ = self.thesock.shutdown();
@@ -192,7 +193,7 @@ impl User {
     */
     pub fn deliver(&mut self, env: &Env) {
         match env.source {
-            Endpoint::User(id) => match &(self.blocks).binary_search(&id) {
+            End::User(id) => match &(self.blocks).binary_search(&id) {
                 Ok(_)  => { /* User is blocked; do not deliver. */ },
                 Err(_) => { self.thesock.enqueue(env.bytes()); },
             },
@@ -203,7 +204,7 @@ impl User {
     /** Encode a `Msg` directly into the outgoing buffer, regardless of
     origin.
     */
-    pub fn deliver_msg(&mut self, msg: &Msg) {
+    pub fn deliver_msg(&mut self, msg: &Sndr) {
         self.thesock.enqueue(&(msg.bytes()));
     }
     
@@ -225,7 +226,7 @@ impl User {
     Unlike the nonblocking sends, this _will_ return an error if encountered,
     _or_ if `limit` passes without the buffer emptying.
     */
-    pub fn blocking_send(&mut self, msg: &Msg, limit: Duration) -> Result<(), UserError> {
+    pub fn blocking_send(&mut self, msg: &Sndr, limit: Duration) -> Result<(), UserError> {
         self.deliver_msg(msg);
         let start_t = Instant::now();
         loop {
@@ -250,7 +251,7 @@ impl User {
     /* Attempt to read data and decode a `Msg` from the underlying socket.
     Any errors will be added to an internal `Vec` and not returned.
     */
-    pub fn try_get(&mut self) -> Option<Msg> {
+    pub fn try_get(&mut self) -> Option<Rcvr> {
         match self.thesock.suck() {
             Err(e) => {
                 self.errs.push(e);
@@ -288,7 +289,7 @@ impl User {
     Unlike the nonblocking reads, this _will_ return an error if encountered,
     or if `limit` goes by without successfully decoding a `Msg`.
     */
-    pub fn blocking_get(&mut self, limit: Duration) -> Result<Msg, UserError> {
+    pub fn blocking_get(&mut self, limit: Duration) -> Result<Rcvr, UserError> {
         match self.thesock.try_get() {
             Err(e) => {
                 let err = UserError::from_socket(&e);

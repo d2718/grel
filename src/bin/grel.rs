@@ -3,7 +3,7 @@ grel.rs
 
 The `grel` terminal client.
 
-updated 2021-01-31
+updated 2021-02-01
 */
 
 use lazy_static::lazy_static;
@@ -18,7 +18,8 @@ use std::time::{Instant};
 
 use crossterm::{event, event::Event, event::KeyCode };
 
-use grel::proto2::{Msg, Op};
+//~ use grel::proto2::{Msg, Op};
+use grel::proto3::{Sndr, Rcvr, SndOp};
 use grel::sock::Sock;
 use grel::config::ClientConfig;
 use grel::line::Line;
@@ -27,12 +28,9 @@ use grel::screen::Screen;
 const JIFFY: std::time::Duration = std::time::Duration::from_millis(0);
 
 lazy_static!{
-    static ref PING: Vec<u8> = Msg::Ping.bytes();
+    static ref PING: Vec<u8> = Sndr::Ping.bytes();
     static ref ROSTER_REQUEST: Vec<u8> =
-        Msg::Query{
-            what: String::from("roster"),
-            arg: String::new(),
-        }.bytes();
+        Sndr::Query{ what: "roster", arg: "", }.bytes();
 }
 
 const SPACE:    char = ' ';
@@ -60,7 +58,7 @@ struct Globals {
 }
 
 impl Globals {
-    pub fn enqueue(&mut self, m: &Msg) {
+    pub fn enqueue(&mut self, m: &Sndr) {
         let b = m.bytes();
         self.socket.enqueue(&b);
     }
@@ -139,7 +137,7 @@ fn connect(cfg: &ClientConfig) -> Result<Sock, String> {
             Ok(sck) => sck,
         },
     };
-    let b = Msg::Name(cfg.name.clone()).bytes();
+    let b = Sndr::Name(&cfg.name).bytes();
     let res = thesock.blocking_send(&b, cfg.tick);
     match res {
         Err(e) => match thesock.shutdown() {
@@ -233,7 +231,7 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
             match cmd.as_str() {
                 "quit" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => { gv.enqueue(&Msg::Logout(arg)); },
+                        Ok((_, arg)) => { gv.enqueue(&Sndr::Logout(&arg)); },
                         Err(_) => { return; },
                     }
                 },
@@ -241,9 +239,9 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 "priv" => {
                     match split_command_toks(&cmd_toks, 2) {
                         Ok((cmds, arg)) => {
-                            gv.enqueue(&Msg::Priv {
-                                who: cmds[1].to_string(),
-                                text: arg,
+                            gv.enqueue(&Sndr::Priv {
+                                who: cmds[1],
+                                text: &arg,
                             });
                         },
                         Err(_) => {
@@ -256,14 +254,14 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 
                 "name" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => { gv.enqueue(&Msg::Name(arg)); },
+                        Ok((_, arg)) => { gv.enqueue(&Sndr::Name(&arg)); },
                         Err(_) => { return; },
                     }
                 },
                 
                 "join" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => { gv.enqueue(&Msg::Join(arg)); },
+                        Ok((_, arg)) => { gv.enqueue(&Sndr::Join(&arg)); },
                         Err(_) => { return; },
                     }
                 },
@@ -271,9 +269,9 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 "who" | "rooms" => {
                     match split_command_toks(&cmd_toks, 1) {
                         Ok((_, arg)) => {
-                            gv.enqueue(&Msg::Query{
-                                what: cmd.clone(),
-                                arg: arg,
+                            gv.enqueue(&Sndr::Query{
+                                what: &cmd,
+                                arg: &arg,
                             });
                         },
                         Err(_) => { return; }
@@ -282,14 +280,14 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                 
                 "block" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => { gv.enqueue(&Msg::Block(arg)); },
+                        Ok((_, arg)) => { gv.enqueue(&Sndr::Block(&arg)); },
                         Err(_) => { return; },
                     }
                 },
                 
                 "unblock" => {
                     match split_command_toks(&cmd_toks, 1) {
-                        Ok((_, arg)) => { gv.enqueue(&Msg::Unblock(arg)); },
+                        Ok((_, arg)) => { gv.enqueue(&Sndr::Unblock(&arg)); },
                         Err(_) => { return; },
                     }
                 },
@@ -302,12 +300,12 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
                             scrn.push_line(sl);
                         },
                         Ok((cmds, arg)) => {
-                            let msg: Option<Msg> = match cmds[1].to_lowercase().as_str() {
-                                "open"   => Some(Msg::Op(Op::Open)),
-                                "close"  => Some(Msg::Op(Op::Close)),
-                                "ban" | "kick" => Some(Msg::Op(Op::Kick(arg))),
-                                "invite" => Some(Msg::Op(Op::Invite(arg))),
-                                "give"   => Some(Msg::Op(Op::Give(arg))),
+                            let msg: Option<Sndr> = match cmds[1].to_lowercase().as_str() {
+                                "open"   => Some(Sndr::Op(SndOp::Open)),
+                                "close"  => Some(Sndr::Op(SndOp::Close)),
+                                "ban" | "kick" => Some(Sndr::Op(SndOp::Kick(&arg))),
+                                "invite" => Some(Sndr::Op(SndOp::Invite(&arg))),
+                                "give"   => Some(Sndr::Op(SndOp::Give(&arg))),
                                 _ => {
                                     let mut sl = Line::new();
                                     sl.pushf(OP_ERROR, &scrn.styles().dim);
@@ -342,9 +340,10 @@ fn respond_to_user_input(ipt: Vec<char>, scrn: &mut Screen, gv: &mut Globals) {
         }
     }
     lines.push(cur_line);
-    gv.enqueue(&Msg::Text {
-        who: String::new(),
-        lines: lines,
+    let lineref: Vec<&str> = lines.iter().map(|x| x.as_str()).collect();
+    gv.enqueue(&Sndr::Text {
+        who: "",
+        lines: &lineref,
     });
 }
 
@@ -393,7 +392,7 @@ fn command_key(evt: event::KeyEvent, scrn: &mut Screen, gv: &mut Globals) {
                 gv.messages.push("Force quit the client.".to_string());
                 gv.run = false;
             } else {
-                gv.enqueue(&Msg::logout("[ client quit  ]"));
+                gv.enqueue(&Sndr::Logout("[ client quit  ]"));
             }
         },
         _ => { /* */ },
@@ -494,15 +493,15 @@ fn process_user_typing(
 
 Returns true if the program should quit.
 */
-fn process_msg(m: Msg,
+fn process_msg(m: Rcvr,
                scrn: &mut Screen,
                gv: &mut Globals)
 -> Result<(), String> {
     debug!("process_msg(...): rec'd: {:?}", &m);
     match m {
-        Msg::Ping => { gv.socket.enqueue(&PING); },
+        Rcvr::Ping => { gv.socket.enqueue(&PING); },
         
-        Msg::Text { who, lines } => {
+        Rcvr::Text { who, lines } => {
             for lin in &lines {
                 let mut sl = Line::new();
                 sl.pushf(&who, &scrn.styles().high);
@@ -512,7 +511,7 @@ fn process_msg(m: Msg,
             }
         },
         
-        Msg::Priv { who, text } => {
+        Rcvr::Priv { who, text } => {
             let mut sl = Line::new();
             sl.push("$ ");
             sl.pushf(&who, &scrn.styles().dim);
@@ -521,26 +520,26 @@ fn process_msg(m: Msg,
             scrn.push_line(sl);
         },
         
-        Msg::Logout(s) => {
+        Rcvr::Logout(s) => {
             gv.messages.push(s);
             gv.run = false;
         },
         
-        Msg::Info(s) => {
+        Rcvr::Info(s) => {
             let mut sl = Line::new();
             sl.push("* ");
             sl.push(&s);
             scrn.push_line(sl);
         },
 
-        Msg::Err(s) => {
+        Rcvr::Err(s) => {
             let mut sl = Line::new();
             sl.pushf("# ", &scrn.styles().dim);
             sl.pushf(&s, &scrn.styles().dim);
             scrn.push_line(sl);
         },
         
-        Msg::Misc { ref what, ref data, ref alt } => match what.as_str() {
+        Rcvr::Misc { ref what, ref alt, ref data, } => match what.as_str() {
             "join" => {
                 let (name, room) = match &data[..] {
                     [x, y] => (x, y),
@@ -701,7 +700,7 @@ fn process_msg(m: Msg,
                 }
             }).collect();
             let mut sl = Line::new();
-            sl.push("# Unsupported Msg: ");
+            sl.push("# Unsupported Rcvr: ");
             sl.push(&s);
             scrn.push_line(sl);
         },
@@ -751,10 +750,7 @@ fn main() {
     println!("...success. Negotiating initial protocol...");
     
     {
-        let b = Msg::Query{
-            what: String::from("addr"),
-            arg: String::new(),
-        }.bytes();
+        let b = Sndr::Query{ what: "addr", arg: "", }.bytes();
         sck.enqueue(&b);
     }
     println!("...success. Initializing terminal.");
@@ -858,6 +854,9 @@ fn main() {
                             },
                             Ok(None) => { break 'msg_loop; },
                             Ok(Some(msg)) => {
+                                // This right here is what we call a hack.
+                                // It'll get removed when `proto3` gets integrated.
+                                //let newmsg: Rcvr = unsafe { std::mem::transmute(msg) };
                                 match process_msg(msg, &mut scrn, &mut gv) {
                                     Ok(()) => { 
                                         if gv.run == false {

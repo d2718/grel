@@ -7,3 +7,5 @@ pub mod proto2;
 pub mod line;
 pub mod screen;
 
+// new!
+pub mod proto3;
