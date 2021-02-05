@@ -9,3 +9,6 @@
 
 # server pidfile
 d.pid
+
+# directory dedicated to comparing different versions
+/compare

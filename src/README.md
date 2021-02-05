@@ -65,6 +65,17 @@ encoded in `Env`s and subsequently written to `Sock`s; `Rcvr`s get decoded
 _from_ `Sock`s. Documentation and cleanup still required, but this seems to
 work.
 
+UPDATE 2020-02-05: In addition to using `&str`s wherever possible, I have
+also replaced `Vec`s with arrays wherever possible, and introduced the
+[`smallvec`](https://docs.rs/smallvec/1.6.1/smallvec/index.html)
+crate and used `SmallVec`s in a lot of situations where fixed-sized
+arrays weren't practical.
+
+Of course, I haven't bothered to introduce a custom allocator to really
+see if this makes a difference (neither `ptrace` or `valgrind`---even with
+`massif`--have been particularly helpful, because it looks like Rust prefers
+`brk()`ing generously and allocating itself rather than calling `malloc()`.)
+
 ### Client spaghetti
 
 Client functionality is split up into several modules (`screen`, `line`,
