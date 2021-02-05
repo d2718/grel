@@ -16,7 +16,5 @@ log = "0.4.11"
 simplelog = "^0.7.6"
 crossterm = "0.19"
 clap = "2.33.3"
-
-# [dependencies.clap]
-# version = "2.33.3"
+smallvec = "1.6.1"
 
