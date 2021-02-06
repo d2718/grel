@@ -3,7 +3,7 @@ greld.rs
 
 The `grel` daemon (server) process.
 
-updated 2021-01-19
+updated 2021-02-01
 */
 
 use std::collections::HashMap;
@@ -14,14 +14,21 @@ use std::time::{Instant, Duration};
 #[allow(unused_imports)]
 use log::{debug, warn, trace};
 use simplelog::WriteLogger;
+use smallvec::SmallVec;
 
-use grel::proto2::*;
+//use grel::proto2::*;
+use grel::proto3::*;
 use grel::user::*;
 use grel::room::Room;
 use grel::sock::Sock;
 use grel::config::ServerConfig;
 
 // const DEBUG: bool = true;
+
+const ENVS_SIZE: usize = 8;
+const LOGOUTS_SIZE: usize = 8;
+const TEXT_SIZE: usize = 2;
+const ROOM_SIZE: usize = 64;
 
 static BLOCK_TIMEOUT: Duration = Duration::from_millis(5000);
 
@@ -85,6 +92,35 @@ impl std::fmt::Debug for Context<'_> {
     }
 }
 
+struct Envs(SmallVec<[Env; ENVS_SIZE]>);
+
+impl Envs {
+    pub fn new0() -> Envs {
+        let sv: SmallVec<[Env; ENVS_SIZE]> = SmallVec::new();
+        return Envs(sv);
+    }
+    
+    pub fn new1(e: Env) -> Envs {
+        let mut sv: SmallVec<[Env; ENVS_SIZE]> = SmallVec::new();
+        sv.push(e);
+        return Envs(sv);
+    }
+    
+    pub fn new2(e0: Env, e1: Env) -> Envs {
+        let mut sv: SmallVec<[Env; ENVS_SIZE]> = SmallVec::new();
+        sv.push(e0); sv.push(e1);
+        return Envs(sv);
+    }
+}
+
+impl AsRef<SmallVec<[Env; ENVS_SIZE]>> for Envs {
+    fn as_ref(&self) -> &SmallVec<[Env; ENVS_SIZE]> { &self.0 }
+}
+impl AsMut<SmallVec<[Env; ENVS_SIZE]>> for Envs {
+    fn as_mut(&mut self) -> &mut SmallVec<[Env; ENVS_SIZE]> { &mut self.0 }
+}
+
+
 fn match_string<T>(s: &str, hash: &HashMap<String, T>) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     for k in hash.keys() {
@@ -110,7 +146,7 @@ fn initial_negotiation(u: &mut User) -> Result<(), String> {
             return Err(err_str);
         },
         Ok(m) => match m {
-            Msg::Name(new_name) => {
+            Rcvr::Name(new_name) => {
                 u.set_name(&new_name);
                 return Ok(());
             },
@@ -172,96 +208,99 @@ to the various types of `proto2::Msg` pulled out of a given user's `sock`.
 /// In response to Msg::Text{ _, lines }
 
 fn do_text(ctxt: &mut Context, lines: Vec<String>)
--> Result<Vec<Env>, String> {
+-> Result<Envs, String> {
     let u = ctxt.gumap(ctxt.uid)?;
+    let mut linesref: SmallVec<[&str; TEXT_SIZE]> = SmallVec::new();
+    for s in lines.iter() { linesref.push(s.as_str()); }
     
-    let msg = Msg::Text {
-        who: u.get_name().to_string() ,
-        lines: lines,
+    let msg = Sndr::Text {
+        who: u.get_name(),
+        lines: &linesref,
     };
     let env = Env::new(
-        Endpoint::User(ctxt.uid),
-        Endpoint::Room(ctxt.rid),
+        End::User(ctxt.uid),
+        End::Room(ctxt.rid),
         &msg);
         
-    return Ok(vec![env]);
+    return Ok(Envs::new1(env));
 }
 
 /// In response to Msg::Priv { who, text }
 
 fn do_priv(ctxt: &mut Context, who: String, text: String)
--> Result<Vec<Env>, String> {
+-> Result<Envs, String> {
     let u = ctxt.gumap(ctxt.uid)?;
     
     let to_tok = ascollapse(&who);
     if to_tok.len() == 0 {
         let env = Env::new(
-            Endpoint::Server,
-            Endpoint::User(ctxt.uid),
-            &Msg::err("The recipient name must have at least one non-whitespace character."));
-        return Ok(vec![env]);
+            End::Server,
+            End::User(ctxt.uid),
+            &Sndr::Err("The recipient name must have at least one non-whitespace character."));
+        return Ok(Envs::new1(env));
     }
     
     let tgt_uid = match ctxt.gustr(&to_tok) {
         None => {
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(ctxt.uid),
-                &Msg::Err(format!("There is no user whose name matches \"{}\".", &to_tok)));
-            return Ok(vec![env]);
+                End::Server,
+                End::User(ctxt.uid),
+                &Sndr::Err(&format!("There is no user whose name matches \"{}\".", &to_tok)));
+            return Ok(Envs::new1(env));
         },
         Some(n) => n,
     };
     let tgt_u = ctxt.gumap(tgt_uid)?;
     
+    let dat: [&str; 2] = [tgt_u.get_name(), &text];
     let echo_env = Env::new(
-        Endpoint::Server,
-        Endpoint::User(ctxt.uid),
-        &Msg::Misc {
-            what: "priv_echo".to_string(),
-            data: vec![tgt_u.get_name().to_string(), text.clone()],
-            alt: format!("$ You @ {}: {}", tgt_u.get_name(), &text),
+        End::Server,
+        End::User(ctxt.uid),
+        &Sndr::Misc {
+            what: "priv_echo",
+            data: &dat,
+            alt: &format!("$ You @ {}: {}", tgt_u.get_name(), &text),
         });
     let to_env = Env::new(
-        Endpoint::User(ctxt.uid),
-        Endpoint::User(tgt_uid),
-        &Msg::Priv {
-            who: u.get_name().to_string(),
-            text: text,
+        End::User(ctxt.uid),
+        End::User(tgt_uid),
+        &Sndr::Priv {
+            who: u.get_name(),
+            text: &text,
         });
     
-    return Ok(vec![echo_env, to_env]);
+    return Ok(Envs::new2(echo_env, to_env));
 }
 
 /// In response to Msg::Name(new_candidate)
 
 fn do_name(ctxt: &mut Context, cfg: &ServerConfig, new_candidate: String)
--> Result<Vec<Env>, String> {
+-> Result<Envs, String> {
     let new_str = ascollapse(&new_candidate);
     if new_str.len() == 0 {
         let env = Env::new(
-            Endpoint::Server,
-            Endpoint::User(ctxt.uid),
-            &Msg::err("Your name must have more whitespace characters."));
-        return Ok(vec![env]);
+            End::Server,
+            End::User(ctxt.uid),
+            &Sndr::Err("Your name must have more whitespace characters."));
+        return Ok(Envs::new1(env));
     } else if new_candidate.len() > cfg.max_user_name_length {
         let env = Env::new(
-            Endpoint::Server,
-            Endpoint::User(ctxt.uid),
-            &Msg::Err(format!("Your name cannot be longer than {} characters.",
+            End::Server,
+            End::User(ctxt.uid),
+            &Sndr::Err(&format!("Your name cannot be longer than {} characters.",
                               &cfg.max_user_name_length)));
-        return Ok(vec![env]);
+        return Ok(Envs::new1(env));
     }
     
     if let Some(ouid) = ctxt.ustr.get(&new_str) {
         let ou = ctxt.gumap(*ouid)?;
         if *ouid != ctxt.uid {
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(ctxt.uid),
-                &Msg::Err(format!("There is already a user named \"{}\".",
+                End::Server,
+                End::User(ctxt.uid),
+                &Sndr::Err(&format!("There is already a user named \"{}\".",
                                   ou.get_name())));
-            return Ok(vec![env]);
+            return Ok(Envs::new1(env));
         }
     }
     
@@ -280,40 +319,41 @@ fn do_name(ctxt: &mut Context, cfg: &ServerConfig, new_candidate: String)
         
         mu.set_name(&new_candidate);
         new_idstr = mu.get_idstr().to_string();
+        let dat: [&str; 2] = [old_name.as_str(), new_candidate.as_str()];
         
         env = Env::new(
-            Endpoint::Server,
-            Endpoint::Room(ctxt.rid),
-            &Msg::Misc {
-                what: "name".to_string(),
-                alt: format!("{} is now known as {}.", &old_name, &new_candidate),
-                data: vec![old_name, new_candidate.clone()],
+            End::Server,
+            End::Room(ctxt.rid),
+            &Sndr::Misc {
+                what: "name",
+                data: &dat,
+                alt: &format!("{} is now known as {}.", &old_name, &new_candidate),
             });
     }
     let _ = ctxt.ustr.remove(&old_idstr);
 
     ctxt.ustr.insert(new_idstr, ctxt.uid);
-    return Ok(vec![env]);
+    return Ok(Envs::new1(env));
 }
 
 /// In response to Msg::Join(room_name)
 
 fn do_join(ctxt: &mut Context, cfg: &ServerConfig, room_name: String)
--> Result<Vec<Env>, String> {
+-> Result<Envs, String> {
     let collapsed = ascollapse(&room_name);
     if collapsed.len() == 0 {
         let env = Env::new(
-            Endpoint::Server,
-            Endpoint::User(ctxt.uid),
-            &Msg::err("A room name must have more non-whitespace characters."));
-        return Ok(vec![env]);
+            End::Server,
+            End::User(ctxt.uid),
+            &Sndr::Err("A room name must have more non-whitespace characters."));
+        return Ok(Envs::new1(env));
     } else if room_name.len() > cfg.max_room_name_length {
         let env = Env::new(
-            Endpoint::Server,
-            Endpoint::User(ctxt.uid),
-            &Msg::Err(format!("Room names cannot be longer than {} characters.",
+            End::Server,
+            End::User(ctxt.uid),
+            &Sndr::Err(&format!("Room names cannot be longer than {} characters.",
                               &cfg.max_room_name_length)));
-        return Ok(vec![env]);
+        return Ok(Envs::new1(env));
     }
     
     let tgt_rid = match ctxt.grstr(&collapsed) {
@@ -324,8 +364,9 @@ fn do_join(ctxt: &mut Context, cfg: &ServerConfig, room_name: String)
             ctxt.rstr.insert(collapsed, new_id);
             ctxt.rmap.insert(new_id, new_room);
             let mu = ctxt.gumap_mut(ctxt.uid)?;
-            let create_msg = Msg::Info(format!("You create room \"{}\".", &room_name));
-            mu.deliver_msg(&create_msg);
+
+            mu.deliver_msg(&Sndr::Info(&format!("You create room \"{}\".",
+                                                &room_name)));
             new_id
         },
     };
@@ -342,77 +383,79 @@ fn do_join(ctxt: &mut Context, cfg: &ServerConfig, room_name: String)
         let targ_r = ctxt.grmap_mut(tgt_rid)?;
         if tgt_rid == rid {
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(uid),
-                &Msg::Info(format!("You are already in \"{}\".", targ_r.get_name())));
-            return Ok(vec![env]);
+                End::Server,
+                End::User(uid),
+                &Sndr::Info(&format!("You are already in \"{}\".", targ_r.get_name())));
+            return Ok(Envs::new1(env));
         } else if targ_r.is_banned(&uid) {
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(uid),
-                &Msg::Info(format!("You are banned from \"{}\".", targ_r.get_name())));
-            return Ok(vec![env]);
+                End::Server,
+                End::User(uid),
+                &Sndr::Info(&format!("You are banned from \"{}\".", targ_r.get_name())));
+            return Ok(Envs::new1(env));
         } else if targ_r.closed && !targ_r.is_invited(&uid) {
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(uid),
-                &Msg::Info(format!("\"{}\" is closed.", targ_r.get_name())));
-            return Ok(vec![env]);
+                End::Server,
+                End::User(uid),
+                &Sndr::Info(&format!("\"{}\" is closed.", targ_r.get_name())));
+            return Ok(Envs::new1(env));
         }
         targ_r.join(uid);
+        let dat: [&str; 2] = [&uname, targ_r.get_name()];
         let join_env = Env::new(
-            Endpoint::Server,
-            Endpoint::Room(tgt_rid),
-            &Msg::Misc {
-                what: "join".to_string(),
-                data: vec![uname.clone(), targ_r.get_name().to_string()],
-                alt: format!("{} joins {}.", &uname, targ_r.get_name()),
+            End::Server,
+            End::Room(tgt_rid),
+            &Sndr::Misc {
+                what: "join",
+                data: &dat,
+                alt: &format!("{} joins {}.", &uname, targ_r.get_name()),
             });
         targ_r.enqueue(join_env);
     }
     
     let cur_r = ctxt.grmap_mut(ctxt.rid)?;
+    let dat: [&str; 2] = [&uname, "[ moved to another room ]"];
     
     let leave_env = Env::new(
-        Endpoint::Server,
-        Endpoint::Room(tgt_rid),
-        &Msg::Misc {
-            what: "leave".to_string(),
-            alt: format!("{} moved to another room.", &uname),
-            data: vec![uname, "[ moved to another room ]".to_string()],
+        End::Server,
+        End::Room(tgt_rid),
+        &Sndr::Misc {
+            what: "leave",
+            alt: &format!("{} moved to another room.", &uname),
+            data: &dat,
         });
     cur_r.leave(uid);
-    return Ok(vec![leave_env]);
+    return Ok(Envs::new1(leave_env));
 }
 
 /// In response to Msg::Block(user_name)
 
 fn do_block(ctxt: &mut Context, user_name: String)
--> Result<Vec<Env>, String> {
+-> Result<Envs, String> {
     let collapsed = ascollapse(&user_name);
     if collapsed.len() == 0 {
         let env = Env::new(
-            Endpoint::Server,
-            Endpoint::User(ctxt.uid),
-            &Msg::err("That cannot be anyone's user name."));
-        return Ok(vec![env]);
+            End::Server,
+            End::User(ctxt.uid),
+            &Sndr::Err("That cannot be anyone's user name."));
+        return Ok(Envs::new1(env));
     }
     let ouid = match ctxt.ustr.get(&collapsed) {
         None => {
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(ctxt.uid),
-                &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-            return Ok(vec![env]);
+                End::Server,
+                End::User(ctxt.uid),
+                &Sndr::Info(&format!("No users matching the pattern \"{}\".", &collapsed)));
+            return Ok(Envs::new1(env));
         },
         Some(n) => *n,
     };
     if ouid == ctxt.uid {
         let env = Env::new(
-            Endpoint::Server,
-            Endpoint::User(ctxt.uid),
-            &Msg::err("You shouldn't block yourself."));
-        return Ok(vec![env]);
+            End::Server,
+            End::User(ctxt.uid),
+            &Sndr::Err("You shouldn't block yourself."));
+        return Ok(Envs::new1(env));
     }
     
     let blocked_name = match ctxt.umap.get(&ouid) {
@@ -421,43 +464,44 @@ fn do_block(ctxt: &mut Context, user_name: String)
     };
     
     let mu = ctxt.gumap_mut(ctxt.uid)?;
-    let msg = match mu.block_id(ouid) {
-        true => Msg::Info(format!("You are now blocking {}.", &blocked_name)),
-        false => Msg::Err(format!("You are already blocking {}.", &blocked_name)),
+    let could_block: bool = mu.block_id(ouid);
+    if could_block {
+        mu.deliver_msg(&Sndr::Info(&format!("You are now blocking {}.", &blocked_name)));
+    } else {
+        mu.deliver_msg(&Sndr::Err(&format!("You are already blocking {}.", &blocked_name)));
     };
-    mu.deliver_msg(&msg);
     
-    return Ok(vec![]);
+    return Ok(Envs::new0());
 }
 
 /// In response to Msg::Unblock(user_name)
 
 fn do_unblock(ctxt: &mut Context, user_name: String)
--> Result<Vec<Env>, String> {
+-> Result<Envs, String> {
     let collapsed = ascollapse(&user_name);
     if collapsed.len() == 0 {
         let env = Env::new(
-            Endpoint::Server,
-            Endpoint::User(ctxt.uid),
-            &Msg::err("That cannot be anyone's user name."));
-        return Ok(vec![env]);
+            End::Server,
+            End::User(ctxt.uid),
+            &Sndr::Err("That cannot be anyone's user name."));
+        return Ok(Envs::new1(env));
     }
     let ouid = match ctxt.ustr.get(&collapsed) {
         None => {
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(ctxt.uid),
-                &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-            return Ok(vec![env]);
+                End::Server,
+                End::User(ctxt.uid),
+                &Sndr::Info(&format!("No users matching the pattern \"{}\".", &collapsed)));
+            return Ok(Envs::new1(env));
         },
         Some(n) => *n,
     };
     if ouid == ctxt.uid {
         let env = Env::new(
-            Endpoint::Server,
-            Endpoint::User(ctxt.uid),
-            &Msg::err("You couldn't block yourself; you can't unblock yourself."));
-        return Ok(vec![env]);
+            End::Server,
+            End::User(ctxt.uid),
+            &Sndr::Err("You couldn't block yourself; you can't unblock yourself."));
+        return Ok(Envs::new1(env));
     }
     
     let blocked_name = match ctxt.umap.get(&ouid) {
@@ -466,19 +510,20 @@ fn do_unblock(ctxt: &mut Context, user_name: String)
     };
     
     let mu = ctxt.gumap_mut(ctxt.uid)?;
-    let msg = match mu.unblock_id(ouid) {
-        true => Msg::Info(format!("You unblock {}.", &blocked_name)),
-        false => Msg::Err(format!("You were not blocking {}.", &blocked_name)),
-    };
-    mu.deliver_msg(&msg);
+    let could_unblock: bool = mu.unblock_id(ouid);
+    if could_unblock {
+        mu.deliver_msg(&Sndr::Info(&format!("You unblock {}.", &blocked_name)));
+    } else {
+        mu.deliver_msg(&Sndr::Err(&format!("You were not blocking {}.", &blocked_name)));
+    }
     
-    return Ok(vec![]);
+    return Ok(Envs::new0());
 }
 
 /// In response to Msg::Logout(salutation)
 
 fn do_logout(ctxt: &mut Context, salutation: String)
--> Result<Vec<Env>, String> {
+-> Result<Envs, String> {
     let mr = match ctxt.rmap.get_mut(&ctxt.rid) {
         None => { return Err(format!("do_logout(r {}, u {}): no Room {}", ctxt.rid, ctxt.uid, ctxt.rid)); },
         Some(r) => r,
@@ -492,23 +537,24 @@ fn do_logout(ctxt: &mut Context, salutation: String)
     let _ = ctxt.ustr.remove(mu.get_idstr());
     mu.logout("You have logged out.");
     
+    let dat: [&str; 2] = [mu.get_name(), &salutation];
     let env = Env::new(
-        Endpoint::Server,
-        Endpoint::Room(ctxt.rid),
-        &Msg::Misc {
-            what: "leave".to_string(),
-            alt: format!("{} leaves: {}", mu.get_name(), &salutation),
-            data: vec![mu.get_name().to_string(), salutation],
+        End::Server,
+        End::Room(ctxt.rid),
+        &Sndr::Misc {
+            what: "leave",
+            alt: &format!("{} leaves: {}", mu.get_name(), &salutation),
+            data: &dat,
         });
     mr.enqueue(env);
     
-    Ok(vec![])
+    Ok(Envs::new0())
 }
 
 /// In response to Msg::Query { what, arg }
 
 fn do_query(ctxt: &mut Context, what: String, arg: String)
--> Result<Vec<Env>, String> {
+-> Result<Envs, String> {
     match what.as_str() {
         "addr" => {
             let mu = ctxt.gumap_mut(ctxt.uid)?;
@@ -520,19 +566,16 @@ fn do_query(ctxt: &mut Context, what: String, arg: String)
                     (s, astr)
                 },
             };
-            let msg = Msg::Misc {
-                what: "addr".to_string(),
-                data: vec![addr_str],
-                alt: alt_str,
-            };
+            let dat: [&str; 1] = [&addr_str];
+            let msg = Sndr::Misc { what: "addr", data: &dat, alt: &alt_str, };
             mu.deliver_msg(&msg);
-            return Ok(vec![]);
+            return Ok(Envs::new0());
         },
         
         "roster" => {
             let r = ctxt.grmap(ctxt.rid)?; 
             let op_id = r.get_op();
-            let mut names_list: Vec<String> = Vec::with_capacity(r.get_users().len());
+            let mut names_list: SmallVec<[&str; ROOM_SIZE]> = SmallVec::with_capacity(r.get_users().len());
             
             for uid in r.get_users().iter().rev() {
                 if *uid != op_id {
@@ -540,7 +583,7 @@ fn do_query(ctxt: &mut Context, what: String, arg: String)
                         None => { warn!("do_query(r {}, u{} {:?}): no User {}",
                                        ctxt.rid, ctxt.uid, &what, uid);
                         },
-                        Some(u) => { names_list.push(u.get_name().to_string()); },
+                        Some(u) => { names_list.push(u.get_name()); },
                     }
                 }
             }
@@ -553,25 +596,23 @@ fn do_query(ctxt: &mut Context, what: String, arg: String)
                 append_comma_delimited_list(&mut altstr, &names_list);
             } else {
                 let op_name = match ctxt.umap.get(&op_id) {
-                    None => "[ ??? ]".to_string(),
-                    Some(u) => u.get_name().to_string(),
+                    None => "[ ??? ]",
+                    Some(u) => u.get_name(),
                 };
-                altstr = format!("{} roster: {} (operator) ", r.get_name(), &op_name);
+                altstr = format!("{} roster: {} (operator) ", r.get_name(), op_name);
                 append_comma_delimited_list(&mut altstr, &names_list);
                 names_list.push(op_name);
             }
 
-            let names_list = names_list.into_iter().rev().collect();
+            let mut names_ref: SmallVec<[&str; ROOM_SIZE]> = SmallVec::with_capacity(names_list.len());
+            for x in names_list.iter().rev() { names_ref.push(x); }
             
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(ctxt.uid),
-                &Msg::Misc {
-                    what: "roster".to_string(),
-                    data: names_list,
-                    alt: altstr,
-                });
-            return Ok(vec![env]);
+                End::Server,
+                End::User(ctxt.uid),
+                &Sndr::Misc { what: "roster", data: &names_ref, alt: &altstr, }
+            );
+            return Ok(Envs::new1(env));
         },
         
         "who" => {
@@ -580,22 +621,20 @@ fn do_query(ctxt: &mut Context, what: String, arg: String)
             let env: Env;
             if matches.len() == 0 {
                 env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info(&format!("No users matching the pattern \"{}\".", &collapsed)));
             } else {
                 let mut altstr = String::from("Matching names: ");
                 append_comma_delimited_list(&mut altstr, &matches);
+                let listref: Vec<&str> = matches.iter().map(|x| x.as_str()).collect();
                 env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::Misc {
-                        what: "who".to_string(),
-                        data: matches,
-                        alt: altstr,
-                    });
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Misc { what: "who", data: &listref, alt: &altstr,}
+                );
             }
-            return Ok(vec![env]);
+            return Ok(Envs::new1(env));
         },
         
         "rooms" => {
@@ -604,46 +643,44 @@ fn do_query(ctxt: &mut Context, what: String, arg: String)
             let env: Env;
             if matches.len() == 0 {
                 env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::Info(format!("No Rooms matching the pattern \"{}\".", &collapsed)));
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info(&format!("No Rooms matching the pattern \"{}\".", &collapsed)));
             } else {
                 let mut altstr = String::from("Matching Rooms: ");
                 append_comma_delimited_list(&mut altstr, &matches);
+                let listref: Vec<&str> = matches.iter().map(|x| x.as_str()).collect();
                 env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::Misc {
-                        what: "rooms".to_string(),
-                        data: matches,
-                        alt: altstr,
-                    });
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Misc { what: "rooms", data: &listref, alt: &altstr, }
+                );
             }
-            return Ok(vec![env]);
+            return Ok(Envs::new1(env));
         },
         
         ukn @ _ => {
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(ctxt.uid),
-                &Msg::Err(format!("Unknown \"Query\" type: \"{}\".", ukn)));
-            return Ok(vec![env]);
+                End::Server,
+                End::User(ctxt.uid),
+                &Sndr::Err(&format!("Unknown \"Query\" type: \"{}\".", ukn)));
+            return Ok(Envs::new1(env));
         },
     }
 }
 
 /// In response to Msg::Op(op)
 
-fn do_op(ctxt: &mut Context, op: Op)
--> Result<Vec<Env>, String> {
+fn do_op(ctxt: &mut Context, op: RcvOp)
+-> Result<Envs, String> {
     {
         let r = ctxt.grmap(ctxt.rid)?;
         if r.get_op() != ctxt.uid {
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(ctxt.uid),
-                &Msg::err("You are not the operator of this Room."));
-            return Ok(vec![env]);
+                End::Server,
+                End::User(ctxt.uid),
+                &Sndr::Err("You are not the operator of this Room."));
+            return Ok(Envs::new1(env));
         }
     }
     
@@ -654,69 +691,69 @@ fn do_op(ctxt: &mut Context, op: Op)
     };
     
     match op {
-        Op::Open => {
+        RcvOp::Open => {
             let cur_r = ctxt.grmap_mut(rid)?;
             if cur_r.closed {
                 cur_r.closed = false;
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::Room(rid),
-                    &Msg::Info(format!("{} has opened {}.", &op_name, cur_r.get_name())));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::Room(rid),
+                    &Sndr::Info(&format!("{} has opened {}.", &op_name, cur_r.get_name())));
+                return Ok(Envs::new1(env));
             } else {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(uid),
-                    &Msg::Info(format!("{} is already open.", cur_r.get_name())));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::User(uid),
+                    &Sndr::Info(&format!("{} is already open.", cur_r.get_name())));
+                return Ok(Envs::new1(env));
             }
         },
         
-        Op::Close => {
+        RcvOp::Close => {
             let cur_r = ctxt.grmap_mut(rid)?;
             if cur_r.closed {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(uid),
-                    &Msg::Info(format!("{} is already closed.", cur_r.get_name())));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::User(uid),
+                    &Sndr::Info(&format!("{} is already closed.", cur_r.get_name())));
+                return Ok(Envs::new1(env));
             } else {
                 cur_r.closed = true;
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::Room(rid),
-                    &Msg::Info(format!("{} has closed {}.", &op_name, cur_r.get_name())));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::Room(rid),
+                    &Sndr::Info(&format!("{} has closed {}.", &op_name, cur_r.get_name())));
+                return Ok(Envs::new1(env));
             }
         },
         
-        Op::Give(ref new_name) => {
+        RcvOp::Give(ref new_name) => {
             let collapsed = ascollapse(&new_name);
             if collapsed.len() == 0 {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::err("That cannot be anyone's user name."));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Err("That cannot be anyone's user name."));
+                return Ok(Envs::new1(env));
             }
             
             let ouid = match ctxt.ustr.get(&collapsed) {
                 None => {
                     let env = Env::new(
-                        Endpoint::Server,
-                        Endpoint::User(ctxt.uid),
-                        &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-                    return Ok(vec![env]);
+                        End::Server,
+                        End::User(ctxt.uid),
+                        &Sndr::Info(&format!("No users matching the pattern \"{}\".", &collapsed)));
+                    return Ok(Envs::new1(env));
                 },
                 Some(n) => *n,
             };
             
             if ouid == ctxt.uid {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::info("You are already the operator of this room."));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info("You are already the operator of this room."));
+                return Ok(Envs::new1(env));
             }
             
             let ou_name = {
@@ -727,41 +764,41 @@ fn do_op(ctxt: &mut Context, op: Op)
             let cur_r = ctxt.grmap_mut(rid)?;
             if !cur_r.get_users().contains(&ouid) {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::Info(format!("{} must be in the room to transfer ownership.", &ou_name)));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info(&format!("{} must be in the room to transfer ownership.", &ou_name)));
+                return Ok(Envs::new1(env));
             }
             cur_r.set_op(ouid);
+            let dat: [&str; 2] = [&ou_name, cur_r.get_name()];
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::Room(rid),
-                //&Msg::Info(format!("The room operator is now {}.", &ou_name)));
-                &Msg::Misc {
-                    what: "new_op".to_string(),
-                    alt: format!("{} is now the operator of {}.", &ou_name, cur_r.get_name()),
-                    data: vec![ou_name, cur_r.get_name().to_string()],
+                End::Server,
+                End::Room(rid),
+                &Sndr::Misc {
+                    what: "new_op",
+                    alt: &format!("{} is now the operator of {}.", &ou_name, cur_r.get_name()),
+                    data: &dat,
                 });
-            return Ok(vec![env]);
+            return Ok(Envs::new1(env));
         },
 
-        Op::Invite(ref uname) => {
+        RcvOp::Invite(ref uname) => {
             let collapsed = ascollapse(&uname);
             if collapsed.len() == 0 {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::info("That cannot be anyone's user name."));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info("That cannot be anyone's user name."));
+                return Ok(Envs::new1(env));
             }
             
             let ouid = match ctxt.ustr.get(&collapsed) {
                 None => {
                     let env = Env::new(
-                        Endpoint::Server,
-                        Endpoint::User(ctxt.uid),
-                        &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-                    return Ok(vec![env]);
+                        End::Server,
+                        End::User(ctxt.uid),
+                        &Sndr::Info(&format!("No users matching the pattern \"{}\".", &collapsed)));
+                return Ok(Envs::new1(env));
                 },
                 Some(n) => *n,
             };
@@ -775,10 +812,10 @@ fn do_op(ctxt: &mut Context, op: Op)
             
             if ouid == ctxt.uid {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::Info(format!("You are already allowed in {}.", cur_r.get_name())));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info(&format!("You are already allowed in {}.", cur_r.get_name())));
+                return Ok(Envs::new1(env));
             };
             
             let ou = match ctxt.umap.get_mut(&ouid) {
@@ -790,61 +827,61 @@ fn do_op(ctxt: &mut Context, op: Op)
             
             if cur_r.is_invited(&ouid) {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::Info(format!("{} has already been invited to {}.",
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info(&format!("{} has already been invited to {}.",
                                         ou.get_name(), cur_r.get_name())));
-                return Ok(vec![env]);
+            return Ok(Envs::new1(env));
             };
             cur_r.invite(ouid);
             
-            let inviter_msg: Msg;
-            let invitee_msg: Msg;
+            let inviter_env: Env;
             if cur_r.get_users().contains(&ouid) {
-                inviter_msg = Msg::Info(format!("{} may now return to {} even when closed.",
-                                                ou.get_name(), cur_r.get_name()));
-                invitee_msg = Msg::Info(format!("You have been invited to return to {} even if it closes.",
-                                                cur_r.get_name()));
+                inviter_env = Env::new(
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info(&format!("{} may now return to {} even when closed.",
+                                                ou.get_name(), cur_r.get_name())));
+                ou.deliver_msg(&Sndr::Info(&format!("You have been invited to return to {} even if it closes.",
+                                                cur_r.get_name())));
             } else {
-                inviter_msg = Msg::Info(format!("You invite {} to join {}.", ou.get_name(), cur_r.get_name()));
-                invitee_msg = Msg::Info(format!("You have been invited to join {}.", cur_r.get_name()));
+                inviter_env = Env::new(
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info(&format!("You invite {} to join {}.", ou.get_name(), cur_r.get_name())));
+                ou.deliver_msg(&Sndr::Info(&format!("You have been invited to join {}.", cur_r.get_name())));
             }
-            ou.deliver_msg(&invitee_msg);
-            let env = Env::new(
-                Endpoint::Server,
-                Endpoint::User(ctxt.uid),
-                &inviter_msg);
-            return Ok(vec![env]);
+            return Ok(Envs::new1(inviter_env));
         },
         
-        Op::Kick(ref uname) => {
+        RcvOp::Kick(ref uname) => {
             let collapsed = ascollapse(&uname);
             if collapsed.len() == 0 {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::info("That cannot be anyone's user name."));
-                return Ok(vec![env]);
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info("That cannot be anyone's user name."));
+                return Ok(Envs::new1(env));
             }
             
             let ouid = match ctxt.ustr.get(&collapsed) {
                 None => {
                     let env = Env::new(
-                        Endpoint::Server,
-                        Endpoint::User(ctxt.uid),
-                        &Msg::Info(format!("No users matching the pattern \"{}\".", &collapsed)));
-                    return Ok(vec![env]);
+                        End::Server,
+                        End::User(ctxt.uid),
+                        &Sndr::Info(&format!("No users matching the pattern \"{}\".", &collapsed)));
+                return Ok(Envs::new1(env));
                 },
                 Some(n) => *n,
             };
             
             if ouid == ctxt.uid {
                 let env = Env::new(
-                    Endpoint::Server,
-                    Endpoint::User(ctxt.uid),
-                    &Msg::info("Bestowing the operator mantle on another and then leaving would be a more orderly transfer of power."
+                    End::Server,
+                    End::User(ctxt.uid),
+                    &Sndr::Info("Bestowing the operator mantle on another and then leaving would be a more orderly transfer of power."
                     ));
-                return Ok(vec![env]);
+                return Ok(Envs::new1(env));
             }
             
             let ku = match ctxt.umap.get_mut(&ouid) {
@@ -867,11 +904,11 @@ fn do_op(ctxt: &mut Context, op: Op)
             
                 if cur_r.is_banned(&ouid) {
                     let env = Env::new(
-                        Endpoint::Server,
-                        Endpoint::User(ctxt.uid),
-                        &Msg::Info(format!("{} is already banned from {}.",
+                        End::Server,
+                        End::User(ctxt.uid),
+                        &Sndr::Info(&format!("{} is already banned from {}.",
                                            ku.get_name(), cur_r.get_name())));
-                    return Ok(vec![env]);
+                    return Ok(Envs::new1(env));
                 };
             
                 cur_r.ban(ouid);
@@ -883,10 +920,10 @@ fn do_op(ctxt: &mut Context, op: Op)
                     */
                     if !cur_r.get_users().contains(&ouid) {
                         let env = Env::new(
-                            Endpoint::Server,
-                            Endpoint::User(ctxt.uid),
-                            &Msg::Info(format!("You have banned {} from {}.", ku.get_name(), cur_r.get_name())));
-                        return Ok(vec![env]);
+                            End::Server,
+                            End::User(ctxt.uid),
+                            &Sndr::Info(&format!("You have banned {} from {}.", ku.get_name(), cur_r.get_name())));
+                        return Ok(Envs::new1(env));
                         /* If the kickee is _not_ in the room, this function
                         returns now. All the rest of the Op::Kick match arm,
                         even after the closing of the conditionals and
@@ -904,12 +941,9 @@ fn do_op(ctxt: &mut Context, op: Op)
                     It requires careful dancing around &mut lifetimes.
                     */
                     
-                    //let to_kicked = Msg::Info(format!("You have been kicked from {}.", cur_r.get_name()));
-                    let to_kicked = Msg::Misc {
-                        what: "kick_you".to_string(),
-                        alt: format!("You have been kicked from {}.", cur_r.get_name()),
-                        data: vec![cur_r.get_name().to_string()],
-                    };
+                    let altstr = format!("You have been kicked from {}.", cur_r.get_name());
+                    let dat: [&str; 1] = [cur_r.get_name()];
+                    let to_kicked = Sndr::Misc { what: "kick_you", alt: &altstr, data: &dat, };
                     ku.deliver_msg(&to_kicked);                    
                     cur_r.leave(ouid);
             
@@ -925,26 +959,28 @@ fn do_op(ctxt: &mut Context, op: Op)
             // If the lobby doesn't exist, the server can go ahead and crash.
             let lobby = ctxt.rmap.get_mut(&0).unwrap();
             lobby.join(ouid);
+            let dat: [&str; 2] = [ku.get_name(), lobby.get_name()];
             let to_lobby = Env::new(
-                Endpoint::Server,
-                Endpoint::Room(ctxt.rid),
-                &Msg::Misc {
-                    what: "join".to_string(),
-                    data: vec![ku.get_name().to_string(), lobby.get_name().to_string()],
-                    alt: format!("{} joins {}.", ku.get_name(), lobby.get_name()),
+                End::Server,
+                End::Room(ctxt.rid),
+                &Sndr::Misc {
+                    what: "join",
+                    data: &dat,
+                    alt: &format!("{} joins {}.", ku.get_name(), lobby.get_name()),
                 });
             lobby.enqueue(to_lobby);
             
+            let dat: [&str; 2] = [ku.get_name(), &cur_room_name];
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::Room(ctxt.rid),
-                &Msg::Misc {
-                    what: "kick_other".to_string(),
-                    alt: format!("{} has been kicked from {}.", ku.get_name(), &cur_room_name),
-                    data: vec![ku.get_name().to_string(), cur_room_name],
+                End::Server,
+                End::Room(ctxt.rid),
+                &Sndr::Misc {
+                    what: "kick_other",
+                    data: &dat,
+                    alt: &format!("{} has been kicked from {}.", ku.get_name(), &cur_room_name),
                 });
             
-            return Ok(vec![env]);
+            return Ok(Envs::new1(env));
         },
     }
 }
@@ -968,13 +1004,12 @@ fn process_room(
     rstr_map: &mut HashMap<String, u64>,
     cfg: &ServerConfig
 ) -> Result<(), String> {
-    let mut uid_list: Vec<u64>;
+    let mut uid_list: SmallVec<[u64; ROOM_SIZE]>;
     {
         match room_map.get(&rid) {
             None  => { return Err(format!("Room {} doesn't exist.", &rid)); },
             Some(r) => {
-                uid_list = vec![0; r.get_users().len()];
-                uid_list.copy_from_slice(r.get_users());
+                uid_list = SmallVec::from_slice(r.get_users());
             },
         }
     }
@@ -988,11 +1023,11 @@ fn process_room(
         rstr: rstr_map,
     };
     
-    let mut envz: Vec<Env> = Vec::new();
-    let mut logouts: Vec<(u64, &str)> = Vec::new();
+    let mut envz: Envs = Envs::new0();
+    let mut logouts: SmallVec<[(u64, &str); LOGOUTS_SIZE]> = SmallVec::new();
     
     for uid in &uid_list {
-        let m: Msg;
+        let m: Rcvr;
         {
             let mu = match ctxt.umap.get_mut(uid) {
                 None => {
@@ -1005,7 +1040,7 @@ fn process_room(
             let over_quota = mu.get_byte_quota() > cfg.byte_limit;
             mu.drain_byte_quota(cfg.byte_tick);
             if over_quota && mu.get_byte_quota() <= cfg.byte_limit {
-                let msg = Msg::err("You may send messages again.");
+                let msg = Sndr::Err("You may send messages again.");
                 mu.deliver_msg(&msg);
             }
             
@@ -1017,7 +1052,7 @@ fn process_room(
                             logouts.push((*uid, "Too long since server received data from the client."));
                         },
                         Some(x) if x > cfg.blackout_time_to_ping => {
-                            mu.deliver_msg(&Msg::Ping);
+                            mu.deliver_msg(&Sndr::Ping);
                         },
                         _ => {},
                     }
@@ -1027,7 +1062,7 @@ fn process_room(
                     if !over_quota {
                         m = msg;
                         if mu.get_byte_quota() > cfg.byte_limit {
-                            let msg = Msg::err("You have exceeded your data quota and your messages will be ignored for a short time.");
+                            let msg = Sndr::Err("You have exceeded your data quota and your messages will be ignored for a short time.");
                             mu.deliver_msg(&msg);
                         }
                     } else {
@@ -1047,16 +1082,16 @@ fn process_room(
         
         let pres = match m {
 
-            Msg::Text { who: _, lines: l } => do_text(&mut ctxt, l),
-            Msg::Priv { who, text }        => do_priv(&mut ctxt, who, text),
-            Msg::Name(new_candidate)       => do_name(&mut ctxt, cfg, new_candidate),
-            Msg::Join(room_name)           => do_join(&mut ctxt, cfg, room_name),
-            Msg::Block(user_name)          => do_block(&mut ctxt, user_name),
-            Msg::Unblock(user_name)        => do_unblock(&mut ctxt, user_name),
-            Msg::Logout(salutation)        => do_logout(&mut ctxt, salutation),
-            Msg::Query{ what, arg }        => do_query(&mut ctxt, what, arg),
-            Msg::Op(op)                    => do_op(&mut ctxt, op),
-            _ => { /* Other patterns require no response. */ Ok(vec![]) },
+            Rcvr::Text { who: _, lines: l } => do_text(&mut ctxt, l),
+            Rcvr::Priv { who, text }        => do_priv(&mut ctxt, who, text),
+            Rcvr::Name(new_candidate)       => do_name(&mut ctxt, cfg, new_candidate),
+            Rcvr::Join(room_name)           => do_join(&mut ctxt, cfg, room_name),
+            Rcvr::Block(user_name)          => do_block(&mut ctxt, user_name),
+            Rcvr::Unblock(user_name)        => do_unblock(&mut ctxt, user_name),
+            Rcvr::Logout(salutation)        => do_logout(&mut ctxt, salutation),
+            Rcvr::Query{ what, arg }        => do_query(&mut ctxt, what, arg),
+            Rcvr::Op(op)                    => do_op(&mut ctxt, op),
+            _ => { /* Other patterns require no response. */ Ok(Envs::new0()) },
         };
         
         match pres {
@@ -1066,25 +1101,28 @@ fn process_room(
                 #[cfg(not(debug_assertions))]
                 warn!("{}", &e);
             },
-            Ok(mut v) => { for env in v.drain(..) { envz.push(env); } },
+            Ok(mut v) => {
+                let evz = envz.as_mut();
+                for env in v.as_mut().drain(..) { evz.push(env); }
+            },
         }
     }
     
     for (uid, errmsg) in logouts.iter() {
         if let Some(mut mu) = ctxt.umap.remove(&uid) {
             let _ = ctxt.ustr.remove(mu.get_idstr());
-            let msg = Msg::logout(errmsg);
+            let msg = Sndr::Logout(errmsg);
             mu.deliver_msg(&msg);
+            let dat: [&str; 2] = [mu.get_name(), "[ disconnected by server ]"];
             let env = Env::new(
-                Endpoint::Server,
-                Endpoint::Room(ctxt.rid),
-                &Msg::Misc {
-                    what: "leave".to_string(),
-                    data: vec![mu.get_name().to_string(),
-                               "[ disconnected by server ]".to_string()],
-                    alt: format!("{} has been disconnected from the server.", mu.get_name()),
+                End::Server,
+                End::Room(ctxt.rid),
+                &Sndr::Misc {
+                    what: "leave",
+                    data: &dat,
+                    alt: &format!("{} has been disconnected from the server.", mu.get_name()),
                 });
-            envz.push(env);
+            envz.as_mut().push(env);
         } else {
             warn!("process_room({} ...): logouts.drain(): no User {}", ctxt.rid, uid);
         }
@@ -1102,9 +1140,9 @@ fn process_room(
                 if let Some(u) = ctxt.umap.get(pnid) {
                     let nid = *pnid;
                     mr.set_op(nid);
-                    let env = Env::new(Endpoint::Server, Endpoint::Room(rid),
-                        &Msg::Info(format!("{} is now the Room operator.", u.get_name())));
-                    envz.push(env);
+                    let env = Env::new(End::Server, End::Room(rid),
+                        &Sndr::Info(&format!("{} is now the Room operator.", u.get_name())));
+                    envz.as_mut().push(env);
                 }
             }
         }
@@ -1114,7 +1152,7 @@ fn process_room(
         let r = ctxt.rmap.get_mut(&rid).unwrap();
         for (uid, _) in logouts.drain(..) { r.leave(uid); }
         r.deliver_inbox(ctxt.umap);
-        for env in &envz {
+        for env in envz.as_ref() {
             r.deliver(env, ctxt.umap);
         }
         uid_list.clear();
@@ -1216,7 +1254,7 @@ fn main() {
         match urecvr.try_recv() {
             Ok(mut u) => {
                 debug!("Accepting user {}: {}", u.get_id(), u.get_name());
-                u.deliver_msg(&Msg::info(&cfg.welcome));
+                u.deliver_msg(&Sndr::Info(&cfg.welcome));
                 
                 let mut rename: Option<String> = None;
                 if u.get_idstr().len() == 0 {
@@ -1232,24 +1270,25 @@ fn main() {
                 
                 if let Some(err_msg) = rename {
                     let new_name = gen_name(u.get_id(), &ustr_map);
-                    let msg = Msg::Err(err_msg);
+                    let msg = Sndr::Err(&err_msg);
                     u.deliver_msg(&msg);
-                    let msg = Msg::Misc {
-                        what: "name".to_string(),
-                        data: vec![String::from(u.get_name()),
-                                   String::from(&new_name)],
-                        alt: format!("You are now known as \"{}\".", &new_name),
-                    };
+                    let old_name = u.get_name().to_string();
+                    let dat: [&str; 2] = [&old_name, &new_name];
+                    let altstr = format!("You are now known as \"{}\".", &new_name);
+                    let msg = Sndr::Misc { what: "name", data: &dat, alt: &altstr, };
                     u.set_name(&new_name);
                     u.deliver_msg(&msg);
                 }
 
-                let msg = Msg::Misc{
-                    what: "join".to_string(),
-                    data: vec![u.get_name().to_string(), cfg.lobby_name.clone()],
-                    alt: format!("{} joins {}.", u.get_name(), cfg.lobby_name.clone()),
-                };
-                let env = Env::new(Endpoint::Server, Endpoint::Room(0), &msg);
+                let dat: [&str; 2] = [u.get_name(), &cfg.lobby_name];
+                let env = Env::new(
+                    End::Server,
+                    End::Room(0),
+                    &Sndr::Misc{
+                        what: "join",
+                        data: &dat,
+                        alt: &format!("{} joins {}.", u.get_name(), &cfg.lobby_name),
+                });
                 let lobby = room_map.get_mut(&0).unwrap();
                 lobby.join(u.get_id());
                 lobby.enqueue(env);

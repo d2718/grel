@@ -4,15 +4,15 @@ sock.rs
 A non-blocking socket wrapper for sending and receiving JSON-encoded
 `proto2::Msg` objects.
 
-updated: 2020-11-28
+updated: 2021-02-01
 
 As `grel` is IRC-style chat software, many messages will have a single
 _source_ and be sent to multiple _destinations_. As such, the operation
 of `sock::Sock` is asymmetrical: Reading _from_ a `Sock` yields
-`proto2::Msg` structs, but the data written _to_ a `Sock` should
+`proto2::Rcvr` structs, but the data written _to_ a `Sock` should
 already be JSON-encoded slices of bytes. This is to avoid the unnecessary
-overhead of encoding a `Msg` once for each recipient. Instead, it gets
-encoded when sticking it into a `proto2::Env`, and those bytes get
+overhead of encoding a `Sndr` once for each recipient. Instead, it gets
+encoded when sticking it into a `proto3::Env`, and those bytes get
 pushed into the `Sock`.
 
 */
@@ -20,7 +20,7 @@ use std::io::{Read, Write};
 use std::net::{TcpStream, Shutdown};
 use std::error::Error;
 use serde_json::error::Category;
-use super::proto2::Msg;
+use super::proto3::Rcvr;
 
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
@@ -199,15 +199,15 @@ impl Sock {
         }
     }
     
-    /** Attempts to decode a `proto2::Msg` from its internal buffer of
+    /** Attempts to decode a `proto3::Rcvr` from its internal buffer of
     data read from the underlying stream. A returned error value means
     the stream is receiving syntactically bad data and should probably be
     shut down. A returned `Ok(None)` means there isn't enough data in the
     buffer to form a full `Msg`.
     */
-    pub fn try_get(&mut self) -> Result<Option<Msg>, SockError> {
+    pub fn try_get(&mut self) -> Result<Option<Rcvr>, SockError> {
         let offs;
-        let maybe_msg = serde_json::from_slice::<Msg>(&self.current);
+        let maybe_msg = serde_json::from_slice::<Rcvr>(&self.current);
         match maybe_msg {
             Ok(m) => {
                 self.current.clear();
@@ -222,7 +222,7 @@ impl Sock {
             },
         }
         
-        let maybe_msg = serde_json::from_slice::<Msg>(&self.current[..offs]);
+        let maybe_msg = serde_json::from_slice::<Rcvr>(&self.current[..offs]);
         match maybe_msg {
             Ok(m) => {
                 let temp = (&self.current[offs..]).to_vec();
@@ -239,7 +239,7 @@ impl Sock {
     `.shutdown()`.
     */
     pub fn blocking_get(&mut self, tick: std::time::Duration)
-    -> Result<Msg, SockError> {
+    -> Result<Rcvr, SockError> {
         if let Some(m) = self.try_get()? { return Ok(m); }
         
         loop {

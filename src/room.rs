@@ -3,7 +3,7 @@ room.rs
 
 The `Room` struct and its associated methods.
 
-updated 2020-11-29
+updated 2020-02-02
 
 A `Room` roughly parallels an IRC "channel". They can be formed on the
 fly from any valid, unique name, and are meant to automatically wink out of
@@ -12,7 +12,7 @@ existence when the last person leaves.
 
 use std::collections::HashMap;
 
-use super::proto2::{Env, Endpoint};
+use super::proto3::{Env, End};
 use super::user::{User, ascollapse};
 
 #[derive(Debug)]
@@ -49,7 +49,7 @@ impl Room {
     
     pub fn deliver(&self, env: &Env, uid_hash: &mut HashMap<u64, User>) {
         match env.dest {
-            Endpoint::User(uid) => {
+            End::User(uid) => {
                 if let Some(u) = uid_hash.get_mut(&uid) { u.deliver(env); }
             },
             _ => {
@@ -64,7 +64,7 @@ impl Room {
     pub fn deliver_inbox(&mut self, uid_hash: &mut HashMap<u64, User>) {
         for env in self.inbox.drain(..) {
             match env.dest {
-                Endpoint::User(uid) => {
+                End::User(uid) => {
                     if let Some(u) = uid_hash.get_mut(&uid) { u.deliver(&env); }
                 },
                 _ => {
