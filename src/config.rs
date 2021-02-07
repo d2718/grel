@@ -1,7 +1,5 @@
 /*!
-config.rs
-
-The `grel` configuration structs and mechanism.
+The `grel` configuration apparatus.
 
 `grel` uses
 [the `directories` crate](https://docs.rs/directories/3.0.1/directories/)
@@ -19,24 +17,28 @@ use simplelog::LevelFilter;
 const CLIENT_NAME: &str = "grel.toml";
 const SERVER_NAME: &str = "greld.toml";
 
-const ADDR:             &str = "127.0.0.1:51516";
-const SERVER_LOG:       &str = "greld.log";
-const NAME:             &str = "grel user";
-const LOBBY_NAME:       &str = "Lobby";
-const WELCOME:          &str = "Welcome to a grel server.";
-const SERVER_TICK:       u64 = 500;
-const BYTE_LIMIT:      usize = 512;
-const BYTE_TICK:       usize = 6;
-const LOG_LEVEL: LevelFilter = LevelFilter::Warn;
-const BLACKOUT_TO_PING:  u64 = 10000;
-const BLACKOUT_TO_KICK:  u64 = 20000;
-const CLIENT_TICK:       u64 = 100;
-const BLOCK_TIMEOUT:     u64 = 5000;
-const READ_SIZE:       usize = 1024;
+/*  Defaults.
+    
+    Some are useful; others not so much.
+*/
+const ADDR:             &str = "127.0.0.1:51516";   // server address (and address client tries)
+const SERVER_LOG:       &str = "greld.log";         // server log file
+const NAME:             &str = "grel user";         // client user name
+const LOBBY_NAME:       &str = "Lobby";             // server landing room name
+const WELCOME:          &str = "Welcome to a grel server."; // server welcome message
+const SERVER_TICK:       u64 = 500;                 // server, min time through main loop
+const BYTE_LIMIT:      usize = 512;                 // server user rate limiting byte quota
+const BYTE_TICK:       usize = 6;                   // server byte quota dissipation per tick
+const LOG_LEVEL: LevelFilter = LevelFilter::Warn;   // server log level
+const BLACKOUT_TO_PING:  u64 = 10000;   /* msec since data received from a client that server will send a ping */
+const BLACKOUT_TO_KICK:  u64 = 20000;   /* to confirm connection or log the client off for unreachability */
+const CLIENT_TICK:       u64 = 100;                 // client time through main loop
+const BLOCK_TIMEOUT:     u64 = 5000;                // unused?
+const READ_SIZE:       usize = 1024;                // client number of bytes per read attempt
 const ROSTER_WIDTH:      u16 = 24;    // Also server max user name and max room name lengths
 const CMD_CHAR:         char = ';';
-const MIN_SCROLLBACK:  usize = 1000;
-const MAX_SCROLLBACK:  usize = 2000;
+const MIN_SCROLLBACK:  usize = 1000;                // client `Line`s of scrollback kept
+const MAX_SCROLLBACK:  usize = 2000;                // client will trim scrollback to MIN_SCROLLBACK when this many `Line`s reached
 
 /** Generate a platform-appropriate path for configuration files. */
 fn default_config_dir() -> PathBuf {
@@ -60,10 +62,10 @@ fn read_first_to_string(ps: &[PathBuf]) -> Result<String, String> {
     Err(misses)
 }
 
-/** The `GrelConfigFile` deserializes from a `.toml` file to a struct
+/** The `ServerConfigFile` deserializes from a `.toml` file to a struct
 of Rust primitives. Its values are then translated into less primitive
-types (or at least some of them are) and shoved into a `GrelConfig`
-struct (see below) for the program to actually use.
+types (or at least some of them are) and shoved into a `ServerConfig`
+struct (see below) for the server program to actually use.
 */
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ServerConfigFile {
@@ -81,9 +83,8 @@ struct ServerConfigFile {
     bytes_per_tick:       Option<usize>,
 }
 
-/** `GrelConfigFile` implements `Default` because this is the mechanism
-by which `confy` supplies default values in the case that options are
-missing from the configuration file.
+/** `ServerConfigFile` implements `Default` because this is what is used if
+a configuration file can't be read.
 */
 impl std::default::Default for ServerConfigFile {
     fn default() -> Self {
@@ -129,7 +130,10 @@ impl ServerConfig {
     `your_system's_standard_config_directory/greld.toml`
     and return a `ServerConfig` object.
     
-    Execution will fail with a message upon error.
+    Errors _parsing_ a config file will terminate with a message. Errors
+    _reading_ a config file (probably "file not found") will result in
+    using the default configuration (which isn't super useful because it
+    binds to 127.0.0.1).
     */
     pub fn configure() -> ServerConfig {
         let mut pathz: Vec<PathBuf> = Vec::new();
@@ -190,6 +194,11 @@ impl ServerConfig {
     }
 }
 
+/** Represents the `[colors]` stanza in the client config file.
+
+    By default these are all `None`, using the default color scheme
+    in the `screen` module.
+*/
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct Colors {
     pub dim_foreground: Option<u8>,
@@ -211,6 +220,11 @@ impl std::default::Default for Colors {
     }
 }
 
+/** The `ClientConfigFile` deserializes from a `.toml` file to a struct
+of Rust primitives. Its values are then translated into less primitive
+types (or at least some of them are) and shoved into a `ClientConfig`
+struct (see below) for the client program to actually use.
+*/
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ClientConfigFile {
     address:        Option<String>,
@@ -225,6 +239,9 @@ struct ClientConfigFile {
     colors: Option<Colors>,
 }
 
+/** `ClientConfigFile` implements `Default` because this is what is used if
+a configuration file can't be read.
+*/
 impl std::default::Default for ClientConfigFile {
     fn default() -> Self {
         Self {
@@ -263,7 +280,6 @@ impl ClientConfig {
     /** Generate a configuration for the client.
     
     Will attempt to read from config files in the following order:
-    
       * supplied as a function argument
       * `grel.toml` in the current directory
       * `grel.toml` in the directory returned by `default_config_dir()`

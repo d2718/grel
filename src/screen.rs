@@ -1,5 +1,4 @@
-/*! `screen.rs` (formerly `ctscreen.rs`)
-
+/*!
 The `grel` client terminal output manager.
 
 This new version uses the
@@ -63,6 +62,22 @@ pub struct Styles {
     pub high_bold: Style,
 }
 
+impl std::default::Default for Styles {
+    fn default() -> Self { 
+        Styles {
+            dim: DEFAULT_DIM.clone(),
+            dim_bold: DEFAULT_DIM_BOLD.clone(),
+            bold: DEFAULT_BOLD.clone(),
+            high: DEFAULT_HIGHLIGHT.clone(),
+            high_bold: DEFAULT_HIGHLIGHT_BOLD.clone(),
+        }
+    }
+}
+
+/** The `Bits` struct holds prerendered bits of stuff that must be
+repeatedly written to the screen, like a full-width horizontal separator
+and the starting and ending borders of status text on the status lines.
+*/
 struct Bits {
     stat_begin:       String,
     stat_begin_chars: usize,
@@ -100,18 +115,9 @@ impl Bits {
     }
 }
 
-impl std::default::Default for Styles {
-    fn default() -> Self { 
-        Styles {
-            dim: DEFAULT_DIM.clone(),
-            dim_bold: DEFAULT_DIM_BOLD.clone(),
-            bold: DEFAULT_BOLD.clone(),
-            high: DEFAULT_HIGHLIGHT.clone(),
-            high_bold: DEFAULT_HIGHLIGHT_BOLD.clone(),
-        }
-    }
-}
-
+/** The `Screen` represents all the state required to display the `grel`
+client UI to the user.
+*/
 pub struct Screen {
     lines: Vec<Line>,
     input: Vec<char>,
@@ -137,7 +143,9 @@ pub struct Screen {
 }
 
 impl Screen {
-    pub fn new(term: &mut Stdout, roster_chars: u16) -> crossterm::Result<Screen> {
+    pub fn new(term: &mut Stdout, roster_chars: u16)
+    -> crossterm::Result<Screen> {
+        
         terminal::enable_raw_mode()?;
         let (x, y): (u16, u16) = terminal::size()?;
         term.queue(cursor::Hide)?

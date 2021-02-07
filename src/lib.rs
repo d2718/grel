@@ -3,7 +3,7 @@ pub mod user;
 pub mod room;
 pub mod unidata;
 pub mod config;
-pub mod proto2;
+//pub mod proto2;
 pub mod line;
 pub mod screen;
 

@@ -1,6 +1,4 @@
 /*!
-user.rs
-
 The `User` struct--representing a connected client--and related methods.
 
 updated: 2021-02-01

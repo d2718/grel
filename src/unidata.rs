@@ -1,5 +1,3 @@
-//! # unidata.rs
-//!
 //! Contains data about decomposable Unicode characters.
 
 use std::collections::HashMap;

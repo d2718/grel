@@ -1,6 +1,5 @@
-/*! `line.rs` (formerly `ctline.rs`)
-
-new formatted text wrapping library for `grel` terminal client
+/*!
+Formatted text wrapping library for `grel` terminal client
 
 This new version uses the
 [`crossterm`](https://github.com/crossterm-rs/crossterm)
